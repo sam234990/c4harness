@@ -1,8 +1,16 @@
-# Cost Router
+<p align="center">
+  <img src="assets/c4.png" width="100" alt="C4Harness logo">
+  <br>
+  <strong style="font-size: 2em;">C4Harness</strong>
+</p>
 
-[English](README.md) | [简体中文](README_zh.md)
+<p align="center"><em>C4 = Codex · Connect · Claude · Cost-router</em></p>
 
-<p align="center"><strong>让长编码任务在多个 Agent Harness 之间流动，同时守住上下文、文件边界与验证质量。</strong></p>
+---
+
+<p align="center"><strong>链接Agent，编排协作，路由降本。</strong></p>
+
+<p align="center"><a href="README.md">English</a> | <a href="README_zh.md">简体中文</a></p>
 
 <p align="center">
   <img alt="状态：实验阶段" src="https://img.shields.io/badge/status-experimental-F59E0B">

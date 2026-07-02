@@ -1,8 +1,16 @@
-# Cost Router
+<p align="center">
+  <img src="assets/c4.png" width="100" alt="C4Harness logo">
+  <br>
+  <strong style="font-size: 2em;">C4Harness</strong>
+</p>
 
-[English](README.md) | [简体中文](README_zh.md)
+<p align="center"><em>C4 = Codex · Connect · Claude · Cost-router</em></p>
 
-<p align="center"><strong>Route long coding tasks across agent harnesses without losing control of context, files, or verification.</strong></p>
+---
+
+<p align="center">Connecting coding agents. Orchestrating collaboration. Routing by cost.</p>
+
+<p align="center"><a href="README.md">English</a> | <a href="README_zh.md">简体中文</a></p>
 
 <p align="center">
   <img alt="Status: Experimental" src="https://img.shields.io/badge/status-experimental-F59E0B">
@@ -11,8 +19,7 @@
   <img alt="Storage: SQLite" src="https://img.shields.io/badge/storage-SQLite-3B82F6?logo=sqlite&logoColor=white">
 </p>
 
-A cost-aware coding-agent router for delegating bounded work from a main Codex
-session to lower-cost or differently specialized workers.
+A cost-aware coding-agent router for delegating bounded work from a main Codex session to lower-cost or differently specialized workers.
 
 > [!IMPORTANT]
 > **Cost Router is experimental.** Claude CLI delegation, read-only Codex
