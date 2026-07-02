@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cost Router Console</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand"><span class="brand-mark">CR</span><span>Cost Router</span></div>
+      <nav>
+        <button class="nav-item active" data-page="overview" data-i18n="overview">总览</button>
+        <button class="nav-item" data-page="calls" data-i18n="callLogs">调用日志</button>
+      </nav>
+      <div class="sidebar-status">
+        <div class="status-row"><span class="live-dot"></span><span data-i18n="localService">本地服务</span></div>
+        <div class="ledger-path" id="ledger-path" title="">-</div>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <button class="menu-button" id="menu-button" aria-label="Menu">☰</button>
+        <div>
+          <h1 id="page-title">分流总览</h1>
+          <p id="page-subtitle">跨项目、跨会话的 worker 使用统计</p>
+        </div>
+        <div class="top-actions">
+          <span class="last-sync" id="last-sync"></span>
+          <button class="lang-button" id="lang-button">EN</button>
+        </div>
+      </header>
+
+      <section class="page active" id="page-overview">
+        <div class="toolbar">
+          <div class="segmented" id="overview-range">
+            <button data-value="7d">7D</button><button class="active" data-value="30d">30D</button>
+            <button data-value="12m">12M</button><button data-value="all" data-i18n="all">全部</button>
+          </div>
+        </div>
+
+        <div class="summary-grid" id="summary-grid"></div>
+
+        <section class="provider-section">
+          <div class="section-heading">
+            <div><h2 data-i18n="routingByBackend">Backend 分流</h2><p data-i18n="routingByBackendSub">调用次数与委托上下文</p></div>
+          </div>
+          <div class="provider-grid" id="provider-grid"></div>
+        </section>
+
+        <section class="chart-section">
+          <div class="section-heading chart-heading">
+            <div><h2 data-i18n="routingTrend">分流趋势</h2><p id="chart-caption"></p></div>
+            <div class="chart-controls">
+              <div class="segmented compact" id="chart-metric">
+                <button class="active" data-value="delegated_tokens" data-i18n="delegated">委托</button>
+                <button data-value="saved_tokens" data-i18n="saved">节省</button>
+                <button data-value="worker_tokens" data-i18n="workerTokens">Worker</button>
+                <button data-value="calls" data-i18n="calls">调用</button>
+              </div>
+              <div class="segmented compact" id="chart-bucket">
+                <button class="active" data-value="day" data-i18n="day">日</button>
+                <button data-value="month" data-i18n="month">月</button>
+              </div>
+            </div>
+          </div>
+          <div class="legend" id="chart-legend"></div>
+          <div class="chart-wrap" id="chart-wrap"><svg id="usage-chart" role="img"></svg><div class="chart-tooltip" id="chart-tooltip"></div></div>
+        </section>
+
+        <section class="recent-section">
+          <div class="section-heading"><div><h2 data-i18n="recentCalls">最近调用</h2><p data-i18n="recentCallsSub">最新完成的 worker 路由</p></div><button class="text-button" id="view-all" data-i18n="viewAll">查看全部</button></div>
+          <div class="recent-list" id="recent-list"></div>
+        </section>
+      </section>
+
+      <section class="page" id="page-calls">
+        <div class="filters">
+          <input id="filter-query" type="search" data-i18n-placeholder="searchPlaceholder" placeholder="搜索任务或 Thread ID">
+          <select id="filter-backend"><option value="" data-i18n="allBackends">全部 Backend</option></select>
+          <select id="filter-model"><option value="" data-i18n="allModels">全部模型</option></select>
+          <select id="filter-status">
+            <option value="" data-i18n="allStatuses">全部状态</option>
+            <option value="accepted" data-i18n="accepted">已通过</option>
+            <option value="rejected" data-i18n="rejected">未通过</option>
+            <option value="error" data-i18n="error">错误</option>
+          </select>
+          <select id="filter-project"><option value="" data-i18n="allProjects">全部项目</option></select>
+        </div>
+        <div class="table-shell">
+          <table>
+            <thead><tr>
+              <th data-i18n="time">时间</th><th data-i18n="task">主任务 / 子任务</th>
+              <th>Backend</th><th data-i18n="model">模型</th><th data-i18n="status">状态</th>
+              <th data-i18n="actualTokens">实际 Token</th><th data-i18n="savedTokens">预估节省</th>
+            </tr></thead>
+            <tbody id="calls-body"></tbody>
+          </table>
+          <div class="empty-state" id="calls-empty" data-i18n="noCalls">没有匹配的调用记录</div>
+        </div>
+        <div class="pagination"><button id="prev-page" data-i18n="previous">上一页</button><span id="page-info"></span><button id="next-page" data-i18n="next">下一页</button></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="drawer-backdrop" id="drawer-backdrop"></div>
+  <aside class="detail-drawer" id="detail-drawer" aria-hidden="true">
+    <div class="drawer-header"><div><span class="eyebrow" data-i18n="callDetail">调用详情</span><h2 id="detail-title">-</h2></div><button class="close-button" id="close-drawer" aria-label="Close">×</button></div>
+    <div class="drawer-content" id="drawer-content"></div>
+  </aside>
+  <script src="/app.js"></script>
+</body>
+</html>

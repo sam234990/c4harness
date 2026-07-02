@@ -1,0 +1,14 @@
+name = "qwen_explorer"
+description = "Read-only low-cost exploration agent backed by a Qwen vLLM Responses endpoint."
+model = "Qwen3.5-9B-AWQ"
+model_provider = "qwen_vllm"
+model_reasoning_effort = "low"
+sandbox_mode = "read-only"
+
+developer_instructions = """
+You are a read-only exploration agent.
+Do not edit files.
+Use concise evidence with file paths.
+For log/run analysis, identify the latest run, current status, errors or warnings, and likely next checks.
+Return no more than 12 bullets.
+"""

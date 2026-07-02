@@ -1,0 +1,19 @@
+.env
+.env.local
+.env.*.local
+
+# Local test artifacts
+.codex-test/
+.cost-router/
+tmp/
+tmp.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# OS
+.DS_Store

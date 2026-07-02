@@ -1,0 +1,8 @@
+2026-06-14 21:30:01 INFO starting SkillOpt training task=searchqa model=Qwen3.5-9B-AWQ
+2026-06-14 21:30:02 INFO loading dataset split=train path=/tmp/example/searchqa/train.jsonl
+2026-06-14 21:34:18 INFO step=100 loss=1.824 reward=0.31 lr=0.000020
+2026-06-14 21:39:42 WARN evaluator timeout after 120s on batch=17 retry=1
+2026-06-14 21:41:13 INFO step=200 loss=1.552 reward=0.38 lr=0.000019
+2026-06-14 21:43:57 ERROR cuda out of memory while allocating 512.00 MiB during eval
+2026-06-14 21:43:58 INFO saving checkpoint path=/tmp/example/runs/searchqa/checkpoint-200
+2026-06-14 21:43:59 ERROR training aborted status=failed
