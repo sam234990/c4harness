@@ -15,5 +15,13 @@ __pycache__/
 build/
 dist/
 
+# Project-specific exclusions
+tests/
+experiments/
+docs/
+outputs/
+skills/*
+!skills/cost-router/
+
 # OS
 .DS_Store
