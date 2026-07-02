@@ -1,4 +1,0 @@
-interface:
-  display_name: "Cost Router"
-  short_description: "Delegate coding work and monitor async workloads"
-  default_prompt: "Use $cost-router to delegate this long task or monitor its workload asynchronously, then verify and return the result."

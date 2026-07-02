@@ -22,7 +22,7 @@
 A cost-aware coding-agent router for delegating bounded work from a main Codex session to lower-cost or differently specialized workers.
 
 > [!IMPORTANT]
-> **Cost Router is experimental.** Claude CLI delegation, read-only Codex
+> **C4Harness is experimental.** Claude CLI delegation, read-only Codex
 > subagents, bounded patch proposals, shared-memory persistence, and the local
 > dashboard work today. Generic asynchronous workloads can also be monitored by
 > a resumable Claude session and returned to Codex on significant or terminal
@@ -47,12 +47,12 @@ A cost-aware coding-agent router for delegating bounded work from a main Codex s
 Track delegated context, estimated main-agent savings, actual worker usage, and
 backend distribution across projects and Codex sessions.
 
-![Cost Router routing overview](assets/dashboard-overview.png)
+![C4Harness routing overview](assets/dashboard-overview.png)
 
 Inspect each call's parent task, worker task, model, verification result, token
 breakdown, raw output, and proposed patch.
 
-![Cost Router call logs and detail drawer](assets/dashboard-call-logs.png)
+![C4Harness call logs and detail drawer](assets/dashboard-call-logs.png)
 
 ## Asynchronous Tasks
 
@@ -81,10 +81,9 @@ cost-router async-task stop async_123456789abc
 cost-router async-task retry-callbacks async_123456789abc
 ```
 
-The deterministic Python controller decides process exit, marker files, timeout,
-and cancellation. Claude analyzes snapshots but cannot override those facts. The
-current runtime does not yet recover an active workload after the controller
-process or machine restarts.
+The deterministic Python runtime process handles scheduling and decides process
+exit, marker files, timeout, and cancellation. It does not use model tokens.
+Claude analyzes snapshots but cannot override those facts.
 
 ## Target Architecture
 
@@ -119,7 +118,7 @@ Core invariant: **Workers propose → Verifier commits → Codex integrates.**
 - [ ] Turn Skill-level decomposition into a persisted parent-task DAG.
 - [ ] Add dependency-aware parallel and sequential worker scheduling.
 - [ ] Route by task difficulty, risk, context size, model capability, and policy.
-- [ ] Add retry budgets, fallback chains, and controller restart recovery.
+- [ ] Add retry budgets, fallback chains, and callback delivery policies.
 
 **Shared memory and files**
 
@@ -151,6 +150,8 @@ Core invariant: **Workers propose → Verifier commits → Codex integrates.**
 ### Install
 
 ```bash
+git clone https://github.com/sam234990/c4harness.git
+cd c4harness
 python3 -m pip install -e .
 cost-router setup
 ```

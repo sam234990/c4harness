@@ -650,7 +650,7 @@ def _worker_prompt(config: AsyncTaskConfig, snapshot: str, event_hint: str) -> s
 Assess only the supplied runtime snapshot. Do not claim to have read other files or run commands.
 Return the requested structured object. Use `needs_input` only when human or orchestrator input is
 actually required, and `stalled` only when the evidence shows progress has stopped. Runtime process
-exit and marker files are decided by the deterministic controller, not by you.
+exit and marker files are decided by the deterministic runtime process, not by you.
 An empty or not-yet-created log near startup is normal and must remain `running` unless other evidence
 shows a problem.
 

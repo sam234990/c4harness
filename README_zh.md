@@ -23,10 +23,10 @@
 更低成本或能力侧重不同的 worker。
 
 > [!IMPORTANT]
-> **Cost Router 仍处于实验阶段。** Claude CLI 委托、只读 Codex subagent、
-> 受限 patch 提案、共享 memory 持久化和本地控制台已经可用；自动任务拆解、
-> 通用异步 workload 也已经可以由可恢复的 Claude session 持续检查，并在重要
-> 事件或终态时返回 Codex。自动任务拆解、调度和 fallback 仍在 Roadmap 中。
+> **C4Harness 仍处于实验阶段。** Claude CLI 委托、只读 Codex subagent、
+> 受限 patch 提案、共享 memory 持久化和本地控制台已经可用；通用异步
+> workload 也可以由可恢复的 Claude session 持续检查，并在重要事件或终态时
+> 返回 Codex。自动任务拆解、调度和 fallback 仍在 Roadmap 中。
 
 ## 项目状态
 
@@ -47,12 +47,12 @@
 跨项目和 Codex 会话查看委托上下文、预估主模型节省、实际 worker Token 与
 backend 分布。
 
-![Cost Router 分流总览](assets/dashboard-overview.png)
+![C4Harness 分流总览](assets/dashboard-overview.png)
 
 查看每次调用的主任务、worker 子任务、模型、验证结果、Token 明细、原始
 输出和 patch 提案。
 
-![Cost Router 调用日志与详情抽屉](assets/dashboard-call-logs.png)
+![C4Harness 调用日志与详情抽屉](assets/dashboard-call-logs.png)
 
 ## 异步任务
 
@@ -79,9 +79,9 @@ cost-router async-task stop async_123456789abc
 cost-router async-task retry-callbacks async_123456789abc
 ```
 
-普通 Python controller 负责判断进程退出、marker 文件、超时与取消；Claude
-只分析快照，不能覆盖这些确定性事实。当前版本尚不能在 controller 进程或机器
-重启后接管仍在运行的 workload。
+普通 Python runtime process 负责定时调度，并判断进程退出、marker 文件、
+超时与取消；它本身不消耗模型 Token。Claude 只分析快照，不能覆盖这些确定性
+事实。
 
 ## 目标架构
 
@@ -116,7 +116,7 @@ cost-router async-task retry-callbacks async_123456789abc
 - [ ] 将 Skill 层任务拆解升级为持久化的 parent-task DAG。
 - [ ] 实现依赖感知的并行与串行 worker 调度。
 - [ ] 根据难度、风险、上下文规模、模型能力和策略自动路由。
-- [ ] 加入重试预算、fallback 链与 controller 重启恢复。
+- [ ] 加入重试预算、fallback 链与 callback 投递策略。
 
 **共享 Memory 与文件**
 
@@ -148,6 +148,8 @@ cost-router async-task retry-callbacks async_123456789abc
 ### 安装
 
 ```bash
+git clone https://github.com/sam234990/c4harness.git
+cd c4harness
 python3 -m pip install -e .
 cost-router setup
 ```

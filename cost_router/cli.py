@@ -141,7 +141,7 @@ def build_parser() -> argparse.ArgumentParser:
     async_start.add_argument("--failure-file", default=None)
     async_start.add_argument("--memory", default=str(default_memory_path()))
     async_start.add_argument(
-        "--foreground", action="store_true", help="Run the controller in this process"
+        "--foreground", action="store_true", help="Run the async runtime in this process"
     )
     async_start.add_argument("--json", action="store_true", help="Print JSON output")
 

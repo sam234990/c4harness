@@ -66,11 +66,11 @@ cost-router async-task start \
 ```
 
 3. Let `--callback auto` capture `CODEX_THREAD_ID`. Do not pass `--callback none` when the user expects completion or failure to return to this Codex thread.
-4. Return the task ID and task directory to the user after the detached controller starts. Do not block the Codex turn by polling healthy progress.
+4. Return the task ID and task directory to the user after the detached runtime process starts. Do not block the Codex turn by polling healthy progress.
 5. On a callback, inspect `cost-router async-task status <task-id>` and `events <task-id>`, then decide whether to report completion, diagnose, patch, or explicitly start a replacement workload.
 6. Use `stop <task-id>` for cancellation and `retry-callbacks <task-id>` when a queued Codex resume failed.
 
-The Python controller owns process exit, timeout, marker files, and cancellation. Claude uses one resumable session for bounded snapshots. Healthy observations stay in memory; completion, failure, timeout, cancellation, stalled work, and requests for input may resume Codex.
+The Python runtime process owns scheduling, process exit, timeout, marker files, and cancellation without using model tokens. Claude uses one resumable session for bounded snapshots. Healthy observations stay in memory; completion, failure, timeout, cancellation, stalled work, and requests for input may resume Codex.
 
 ## Decomposition Rules
 
@@ -84,7 +84,7 @@ The Python controller owns process exit, timeout, marker files, and cancellation
 ## Current Boundaries
 
 - The router CLI executes one worker task per invocation. The main Codex session currently performs decomposition and scheduling.
-- The async runtime can own one workload per task and resume a Claude monitoring session, but it does not yet recover active workloads after a controller or machine restart.
+- The async runtime owns one workload per task and uses Claude only for bounded observations and terminal summaries.
 - Claude CLI supports bounded patch proposals in a staged workspace. Codex subagent delegation remains read-only.
 - Patch workers edit copies, never the target repository. The main agent reviews and applies accepted patches.
 - Multiple delegated calls are not yet represented as one persisted task DAG.
