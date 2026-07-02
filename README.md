@@ -40,12 +40,12 @@ session to lower-cost or differently specialized workers.
 Track delegated context, estimated main-agent savings, actual worker usage, and
 backend distribution across projects and Codex sessions.
 
-![Cost Router routing overview](docs/assets/dashboard-overview.png)
+![Cost Router routing overview](assets/dashboard-overview.png)
 
 Inspect each call's parent task, worker task, model, verification result, token
 breakdown, raw output, and proposed patch.
 
-![Cost Router call logs and detail drawer](docs/assets/dashboard-call-logs.png)
+![Cost Router call logs and detail drawer](assets/dashboard-call-logs.png)
 
 ## Asynchronous Tasks
 
@@ -81,7 +81,7 @@ process or machine restarts.
 
 ## Target Architecture
 
-![Cost-Aware Coding Router — end-to-end flow and multi-layer shared memory graph](docs/router.png)
+![Cost-Aware Coding Router — end-to-end flow and multi-layer shared memory graph](assets/router.png)
 
 The system follows a three-stage pipeline — **Task Router → Delegator → Verifier** — orchestrated by a Codex main session. Workers propose patches and facts; the verifier commits only validated results into the shared memory graph.
 

@@ -39,12 +39,12 @@
 跨项目和 Codex 会话查看委托上下文、预估主模型节省、实际 worker Token 与
 backend 分布。
 
-![Cost Router 分流总览](docs/assets/dashboard-overview.png)
+![Cost Router 分流总览](assets/dashboard-overview.png)
 
 查看每次调用的主任务、worker 子任务、模型、验证结果、Token 明细、原始
 输出和 patch 提案。
 
-![Cost Router 调用日志与详情抽屉](docs/assets/dashboard-call-logs.png)
+![Cost Router 调用日志与详情抽屉](assets/dashboard-call-logs.png)
 
 ## 异步任务
 
@@ -77,7 +77,7 @@ cost-router async-task retry-callbacks async_123456789abc
 
 ## 目标架构
 
-![Cost-Aware Coding Router — 端到端流程与多层共享内存图](docs/router.png)
+![Cost-Aware Coding Router — 端到端流程与多层共享内存图](assets/router.png)
 
 系统采用三阶段流水线 — **Task Router → Delegator → Verifier** — 由 Codex 主会话编排。Worker 提出 patch 和事实；verifier 只将验证通过的结果提交到共享 memory 图中。
 
