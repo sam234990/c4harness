@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .config import ProviderConfig
-from .schemas import Difficulty, Risk, RouteDecision, Task, TaskMode
+from .config.providers import ProviderConfig
+from .core.contracts import Difficulty, Risk, RouteDecision, Task, TaskMode
 
 
 LOG_SUFFIXES = {".log", ".out", ".err", ".txt"}

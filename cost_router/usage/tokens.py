@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .schemas import Task, TokenAnalysis, TokenUsage, WorkerResult
+from ..core.contracts import Task, TokenAnalysis, TokenUsage, WorkerResult
 
 
 TOKEN_USED_RE = re.compile(r"tokens used\s*\n\s*([\d,]+)", re.IGNORECASE)

@@ -1,18 +1,5 @@
-from __future__ import annotations
+"""Backward-compatible global path helpers."""
 
-import os
-from pathlib import Path
+from .config.paths import data_home, default_memory_path
 
-
-def data_home() -> Path:
-    configured = os.environ.get("XDG_DATA_HOME")
-    if configured:
-        return Path(configured).expanduser()
-    return Path.home() / ".local" / "share"
-
-
-def default_memory_path() -> Path:
-    configured = os.environ.get("COST_ROUTER_MEMORY")
-    if configured:
-        return Path(configured).expanduser()
-    return data_home() / "cost-router" / "memory.sqlite3"
+__all__ = ["data_home", "default_memory_path"]

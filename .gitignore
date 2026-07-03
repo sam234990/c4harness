@@ -18,10 +18,10 @@ dist/
 # Project-specific exclusions
 tests/
 experiments/
-docs/
 outputs/
 skills/*
 !skills/cost-router/
+background/
 
 # OS
 .DS_Store

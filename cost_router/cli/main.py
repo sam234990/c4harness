@@ -10,16 +10,15 @@ import threading
 import time
 from pathlib import Path
 
-from .backends.codex_subagent import CodexSubagentBackend
-from .backends.external_cli import claude_cli_backend
-from .config import ConfigError, load_env_file, provider_from_env
-from .hooks import HookSet
-from .memory import MemoryStore
-from .paths import default_memory_path
-from .router import route_task
-from .schemas import Task, TaskConstraints, TaskMode, WorkerResult
-from .usage import estimate_delegation_savings
-from .verifier import verify_worker_result
+from ..config.providers import ConfigError, load_env_file, provider_from_env
+from ..core.contracts import Task, TaskConstraints, TaskMode
+from ..delegator.backends.codex_subagent import CodexSubagentBackend
+from ..delegator.backends.external_cli import claude_cli_backend
+from ..delegator.runtime import DelegationRuntime, PreparedWorker
+from ..memory import MemoryStore
+from ..config.paths import default_memory_path
+from ..router import route_task
+from ..usage import estimate_delegation_savings
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -212,49 +211,29 @@ def run_command(args: argparse.Namespace) -> int:
         constraints=TaskConstraints(mode=mode),
         parent_task_label=args.parent_task_label,
     )
-    hooks = HookSet()
-    hooks.pre_route(task)
+    runtime = DelegationRuntime(MemoryStore(Path(args.memory)))
     if args.backend == "codex-subagent":
         assert provider is not None
-        decision = route_task(task, provider, args.worker)
-        prepared = prepare_codex_backend(args, task, provider)
+        decide = lambda current: route_task(current, provider, args.worker)
+        prepare = lambda current: prepare_codex_backend(args, current, provider)
     else:
-        decision = make_claude_decision(args, task)
-        prepared = prepare_claude_backend(args, task)
-    hooks.post_route(task, decision)
-
-    result: WorkerResult | None = None
-    verification = None
-    if args.execute:
-        hooks.pre_delegate(task, decision)
-        result = prepared["runner"](
-            task=task,
-            command=prepared["command"],
-            output_file=prepared["output_file"],
-            timeout_sec=task.constraints.max_runtime_sec,
-            cwd=task.repo,
-        )
-        hooks.post_delegate(task, result)
-        verification = verify_worker_result(result, task.repo, task)
-        hooks.post_verify(task, verification)
-        MemoryStore(Path(args.memory)).record_subtask(
-            task=task,
-            decision=decision,
-            result=result,
-            verification=verification,
-        )
-    else:
-        MemoryStore(Path(args.memory)).record_subtask(task=task, decision=decision)
+        decide = lambda current: make_claude_decision(args, current)
+        prepare = lambda current: prepare_claude_backend(args, current)
+    outcome = runtime.dispatch(
+        task,
+        decide=decide,
+        prepare=prepare,
+        execute=args.execute,
+    )
+    decision = outcome.decision
+    prepared = outcome.prepared
+    result = outcome.result
+    verification = outcome.verification
 
     payload = {
         "task": task.to_dict(),
         "decision": decision.to_dict(),
-        "prepared": {
-            "agent_file": str(prepared["agent_file"]) if prepared.get("agent_file") else None,
-            "output_file": str(prepared["output_file"]),
-            "prompt": prepared["prompt"],
-            "command": _redact_command(prepared["command"], provider),
-        },
+        "prepared": prepared.public_dict(_redact_command(prepared.command, provider)),
         "executed": args.execute,
         "token_analysis_estimate": estimate_delegation_savings(task).to_dict(),
         "result": result.to_dict() if result else None,
@@ -276,29 +255,28 @@ def load_env_file_if_exists(path: Path) -> None:
 def prepare_codex_backend(args: argparse.Namespace, task: Task, provider):
     backend = CodexSubagentBackend(provider=provider, worker_name=args.worker)
     agent_file, output_file, command, prompt = backend.prepare(task)
-    return {
-        "agent_file": agent_file,
-        "output_file": output_file,
-        "command": command,
-        "prompt": prompt,
-        "runner": backend.run_prepared,
-    }
+    return PreparedWorker(
+        agent_file=agent_file,
+        output_file=output_file,
+        command=command,
+        prompt=prompt,
+        runner=backend.run_prepared,
+    )
 
 
 def prepare_claude_backend(args: argparse.Namespace, task: Task):
     backend = claude_cli_backend(command=args.claude_command, model=args.claude_model)
     output_file, command, prompt = backend.prepare(task)
-    return {
-        "agent_file": None,
-        "output_file": output_file,
-        "command": command,
-        "prompt": prompt,
-        "runner": backend.run_prepared,
-    }
+    return PreparedWorker(
+        output_file=output_file,
+        command=command,
+        prompt=prompt,
+        runner=backend.run_prepared,
+    )
 
 
 def make_claude_decision(args: argparse.Namespace, task: Task):
-    from .schemas import Difficulty, Risk, RouteDecision
+    from ..core.contracts import Difficulty, Risk, RouteDecision
 
     return RouteDecision(
         difficulty=Difficulty.MEDIUM if task.constraints.mode == TaskMode.PATCH else Difficulty.SIMPLE,
@@ -438,7 +416,7 @@ def memory_command(args: argparse.Namespace) -> int:
 
 
 def dashboard_command(args: argparse.Namespace) -> int:
-    from .dashboard import serve_dashboard
+    from ..dashboard.server import serve_dashboard
 
     serve_dashboard(
         Path(args.memory).expanduser(),
@@ -450,7 +428,7 @@ def dashboard_command(args: argparse.Namespace) -> int:
 
 
 def setup_command(args: argparse.Namespace) -> int:
-    from .setup_user import setup_user
+    from ..setup_user import setup_user
 
     payload = setup_user(force=args.force)
     if args.json:
@@ -467,7 +445,7 @@ def setup_command(args: argparse.Namespace) -> int:
 
 
 def async_task_command(args: argparse.Namespace) -> int:
-    from .async_tasks import AsyncTaskConfig, AsyncTaskRuntime, AsyncTaskStore, retry_callbacks
+    from ..delegator.async_runtime import AsyncTaskConfig, AsyncTaskRuntime, AsyncTaskStore, retry_callbacks
 
     if not args.async_command:
         print("usage: cost-router async-task {start,status,list,events,stop,retry-callbacks}")
@@ -526,7 +504,7 @@ def async_task_command(args: argparse.Namespace) -> int:
                 [
                     sys.executable,
                     "-m",
-                    "cost_router.async_tasks",
+                    "cost_router.delegator.async_runtime",
                     "--task-id",
                     config.id,
                     "--memory",

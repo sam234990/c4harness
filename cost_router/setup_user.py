@@ -6,7 +6,7 @@ import shutil
 from typing import Any
 
 from .memory import MemoryStore
-from .paths import default_memory_path
+from .config.paths import default_memory_path
 
 
 def setup_user(*, force: bool = False) -> dict[str, Any]:

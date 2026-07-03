@@ -4,9 +4,12 @@ import json
 import hashlib
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .schemas import RouteDecision, Task, VerificationResult, WorkerResult
+from ..core.contracts import RouteDecision, Task, VerificationResult, WorkerResult
+
+if TYPE_CHECKING:
+    from ..core.graph import DecompositionPlan
 
 
 SCHEMA = """
@@ -260,6 +263,77 @@ class MemoryStore:
                             _dump({"fact": fact, "source": "verifier.memory_facts"}),
                         ),
                     )
+
+    def record_decomposition(self, task: Task, plan: DecompositionPlan) -> None:
+        """Persist a validated contract graph before worker execution begins."""
+        plan.validate()
+        if plan.situation.task_id != task.id:
+            raise ValueError("Decomposition plan and task ids must match.")
+        self.record_run(task)
+        root_node_id = f"{task.id}:root_contract"
+        node_ids = {
+            node_id: f"{task.id}:contract:{node_id}" for node_id in plan.graph.nodes
+        }
+        with sqlite3.connect(self.path) as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO nodes (
+                  id, run_id, kind, title, summary, visibility, status,
+                  owner, metadata_json, updated_at
+                ) VALUES (?, ?, 'root_contract', ?, ?, 'orchestrator', 'active',
+                          'orchestrator', ?, CURRENT_TIMESTAMP)
+                """,
+                (
+                    root_node_id,
+                    task.id,
+                    task.parent_task_label or task.goal,
+                    plan.situation.objective,
+                    _dump(
+                        {
+                            "shape": plan.shape.value,
+                            "reasons": plan.reasons,
+                            "situation": plan.situation.to_dict(),
+                            "root_contract": plan.situation.root_contract.to_dict(),
+                        }
+                    ),
+                ),
+            )
+            for node_id, node in plan.graph.nodes.items():
+                stored_node_id = node_ids[node_id]
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO nodes (
+                      id, run_id, kind, title, summary, visibility, status,
+                      owner, metadata_json, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, 'worker', 'planned', ?, ?, CURRENT_TIMESTAMP)
+                    """,
+                    (
+                        stored_node_id,
+                        task.id,
+                        node.kind.value,
+                        node.objective,
+                        node.verification.root_contribution,
+                        node.assigned_worker_id,
+                        _dump(node.to_dict()),
+                    ),
+                )
+                self._insert_edge(
+                    conn,
+                    run_id=task.id,
+                    src=root_node_id,
+                    dst=stored_node_id,
+                    edge_type="contains",
+                    metadata={"graph_version": plan.graph.version},
+                )
+            for edge in plan.graph.edges:
+                self._insert_edge(
+                    conn,
+                    run_id=task.id,
+                    src=node_ids[edge.source],
+                    dst=node_ids[edge.target],
+                    edge_type=edge.edge_type,
+                    metadata={"graph_version": plan.graph.version},
+                )
 
     def recent_runs(self, limit: int = 10) -> list[dict[str, Any]]:
         self.init()

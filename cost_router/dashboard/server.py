@@ -1,3 +1,5 @@
+"""Standard-library HTTP server for the local dashboard."""
+
 from __future__ import annotations
 
 from http import HTTPStatus
@@ -10,7 +12,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 import webbrowser
 
-from .analytics import AnalyticsStore
+from ..usage.aggregation import AnalyticsStore
 
 
 STATIC_TYPES = {
