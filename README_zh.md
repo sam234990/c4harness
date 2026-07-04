@@ -62,6 +62,8 @@ workload，定期把有限的日志快照交给同一个 Claude session，向 SQ
 
 ```bash
 cost-router async-task start \
+  --external-policy allow \
+  --data-classification private \
   --goal "持续检查长任务，在失败或完成时返回可执行结论" \
   --command "bash scripts/run_job.sh --config configs/job.yaml" \
   --log-path outputs/progress.log \
@@ -194,6 +196,21 @@ $cost-router Investigate this long coding task, delegate suitable exploratory wo
 
 Codex 也可能为可拆分的、上下文密集的编码任务自动选择该 skill。调试阶段建议显式调用。
 
+### 外部 Worker 策略
+
+C4Harness 将用户授权与宿主强制策略分成两层：
+
+| 策略 | 行为 |
+|---|---|
+| `never` | 不执行任何外部 worker |
+| `ask` | 允许公开或合成数据；私有数据需要明确授权 |
+| `allow` | 记录用户已经明确授权本次边界明确的外部传输 |
+
+仓库输入默认标记为 `private`。当用户明确要求 Codex 使用 Claude 处理指定
+仓库文件时，Skill 会传入 `--external-policy allow --data-classification
+private`，不会把用户的明确要求误判为“尚未授权”。该标记不能覆盖 Codex
+沙箱、审批、组织或数据外发策略；宿主仍可能拒绝执行。
+
 ### 打开统计控制台
 
 ```bash
@@ -249,6 +266,8 @@ python3 -m cost_router run \
 python3 -m cost_router run \
   --backend claude-cli \
   --claude-model sonnet \
+  --external-policy allow \
+  --data-classification private \
   --goal "review the implementation against the memory design" \
   --context-pack docs/memory.md \
   --path cost_router/memory.py \
@@ -271,6 +290,7 @@ Claude CLI 默认使用 `claude -p --output-format json`：
 python3 -m cost_router run \
   --backend claude-cli \
   --claude-command claude \
+  --data-classification synthetic \
   --goal "analyze synthetic SkillOpt failure log" \
   --path experiments/sample-skillopt-run.log \
   --execute
@@ -283,6 +303,8 @@ python3 -m cost_router run \
 ```bash
 cost-router run \
   --backend claude-cli \
+  --external-policy allow \
+  --data-classification private \
   --mode patch \
   --parent-task-label "改进 Router 验证机制" \
   --goal "add validation for empty task goals" \

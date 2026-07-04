@@ -63,6 +63,8 @@ thread only when attention is needed or the workload reaches a terminal state.
 
 ```bash
 cost-router async-task start \
+  --external-policy allow \
+  --data-classification private \
   --goal "Monitor this long job and return actionable failures or completion" \
   --command "bash scripts/run_job.sh --config configs/job.yaml" \
   --log-path outputs/progress.log \
@@ -197,6 +199,22 @@ $cost-router Investigate this long coding task, delegate suitable exploratory wo
 
 Codex may also select the skill implicitly for decomposable, context-heavy coding work. Explicit invocation is preferable while the workflow is being tested.
 
+### External worker policy
+
+C4Harness separates user authorization from host enforcement:
+
+| Policy | Behavior |
+|---|---|
+| `never` | Never execute an external worker |
+| `ask` | Permit public/synthetic data; private data requires explicit authorization |
+| `allow` | Record that the user explicitly authorized this bounded external transfer |
+
+Repository inputs default to `private`. When a user explicitly asks Codex to use
+Claude on named repository files, the Skill passes `--external-policy allow
+--data-classification private`. This avoids treating an explicit request as
+missing consent. It does not override Codex sandbox, approval, organization, or
+data-egress policy, which may still deny execution.
+
 ### Open the dashboard
 
 ```bash
@@ -254,6 +272,8 @@ With a context pack:
 python3 -m cost_router run \
   --backend claude-cli \
   --claude-model sonnet \
+  --external-policy allow \
+  --data-classification private \
   --goal "review the implementation against the memory design" \
   --context-pack docs/memory.md \
   --path cost_router/memory.py \
@@ -276,6 +296,7 @@ Claude CLI execution uses `claude -p --output-format json` by default:
 python3 -m cost_router run \
   --backend claude-cli \
   --claude-command claude \
+  --data-classification synthetic \
   --goal "analyze synthetic SkillOpt failure log" \
   --path experiments/sample-skillopt-run.log \
   --execute
@@ -288,6 +309,8 @@ Use patch mode when a worker may edit a small, explicit file set:
 ```bash
 cost-router run \
   --backend claude-cli \
+  --external-policy allow \
+  --data-classification private \
   --mode patch \
   --parent-task-label "Router validation improvements" \
   --goal "add validation for empty task goals" \

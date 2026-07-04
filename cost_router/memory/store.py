@@ -132,6 +132,8 @@ CREATE TABLE IF NOT EXISTS async_tasks (
   callback_mode TEXT NOT NULL DEFAULT 'none',
   claude_command TEXT NOT NULL DEFAULT 'claude',
   codex_command TEXT NOT NULL DEFAULT 'codex',
+  external_policy TEXT NOT NULL DEFAULT 'ask',
+  data_classification TEXT NOT NULL DEFAULT 'private',
   worker_session_id TEXT,
   runtime_pid INTEGER,
   workload_pid INTEGER,
@@ -859,6 +861,14 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     }
     _add_missing_columns(conn, "runs", run_columns)
     _add_missing_columns(conn, "subtasks", subtask_columns)
+    _add_missing_columns(
+        conn,
+        "async_tasks",
+        {
+            "external_policy": "TEXT NOT NULL DEFAULT 'ask'",
+            "data_classification": "TEXT NOT NULL DEFAULT 'private'",
+        },
+    )
     _backfill_subtasks(conn)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_subtasks_created_at ON subtasks(created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_subtasks_backend ON subtasks(backend)")

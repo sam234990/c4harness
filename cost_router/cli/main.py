@@ -11,7 +11,13 @@ import time
 from pathlib import Path
 
 from ..config.providers import ConfigError, load_env_file, provider_from_env
-from ..core.contracts import Task, TaskConstraints, TaskMode
+from ..core.contracts import (
+    DataClassification,
+    ExternalPolicy,
+    Task,
+    TaskConstraints,
+    TaskMode,
+)
 from ..delegator.backends.codex_subagent import CodexSubagentBackend
 from ..delegator.backends.external_cli import claude_cli_backend
 from ..delegator.runtime import DelegationRuntime, PreparedWorker
@@ -84,6 +90,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--claude-command", default="claude", help="Claude CLI command path")
     run.add_argument("--claude-model", default=None, help="Optional Claude CLI model")
+    run.add_argument(
+        "--external-policy",
+        choices=[item.value for item in ExternalPolicy],
+        default=ExternalPolicy.ASK.value,
+        help="External transfer policy: never, ask, or explicitly user-authorized allow",
+    )
+    run.add_argument(
+        "--data-classification",
+        choices=[item.value for item in DataClassification],
+        default=DataClassification.PRIVATE.value,
+        help="Classification of content staged for the external worker",
+    )
     run.add_argument("--memory", default=str(default_memory_path()))
     run.add_argument("--execute", action="store_true", help="Actually invoke the worker backend")
     run.add_argument("--json", action="store_true", help="Print JSON output")
@@ -124,6 +142,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     async_start.add_argument("--claude-command", default="claude")
     async_start.add_argument("--claude-model", default=None)
+    async_start.add_argument(
+        "--external-policy",
+        choices=[item.value for item in ExternalPolicy],
+        default=ExternalPolicy.ASK.value,
+    )
+    async_start.add_argument(
+        "--data-classification",
+        choices=[item.value for item in DataClassification],
+        default=DataClassification.PRIVATE.value,
+    )
     async_start.add_argument("--codex-command", default="codex")
     async_start.add_argument(
         "--callback",
@@ -191,6 +219,10 @@ def run_command(args: argparse.Namespace) -> int:
             return 2
 
     repo = Path(args.repo).resolve()
+    policy_error = external_policy_error(args)
+    if policy_error:
+        print(f"config error: {policy_error}")
+        return 2
     mode = TaskMode.PATCH if args.mode == "patch" else TaskMode.READ_ONLY
     write_paths = [_resolve_from_repo(repo, item) for item in args.write_path]
     if mode == TaskMode.PATCH and not write_paths:
@@ -208,7 +240,11 @@ def run_command(args: argparse.Namespace) -> int:
         paths=[_resolve_from_repo(repo, item) for item in args.path],
         write_paths=write_paths,
         context_packs=[_resolve_from_repo(repo, item) for item in args.context_pack],
-        constraints=TaskConstraints(mode=mode),
+        constraints=TaskConstraints(
+            mode=mode,
+            external_policy=ExternalPolicy(args.external_policy),
+            data_classification=DataClassification(args.data_classification),
+        ),
         parent_task_label=args.parent_task_label,
     )
     runtime = DelegationRuntime(MemoryStore(Path(args.memory)))
@@ -252,6 +288,29 @@ def load_env_file_if_exists(path: Path) -> None:
         load_env_file(path)
 
 
+def external_policy_error(args: argparse.Namespace) -> str | None:
+    if args.backend != "claude-cli" or not args.execute:
+        return None
+    return external_transfer_error(args.backend, args.external_policy, args.data_classification)
+
+
+def external_transfer_error(
+    backend: str, policy_value: str, classification_value: str
+) -> str | None:
+    if backend != "claude-cli":
+        return None
+    policy = ExternalPolicy(policy_value)
+    classification = DataClassification(classification_value)
+    if policy == ExternalPolicy.NEVER:
+        return "Claude CLI is disabled by --external-policy never"
+    if policy == ExternalPolicy.ASK and classification == DataClassification.PRIVATE:
+        return (
+            "private content requires explicit user authorization; after the user approves "
+            "this bounded transfer, rerun with --external-policy allow"
+        )
+    return None
+
+
 def prepare_codex_backend(args: argparse.Namespace, task: Task, provider):
     backend = CodexSubagentBackend(provider=provider, worker_name=args.worker)
     agent_file, output_file, command, prompt = backend.prepare(task)
@@ -286,9 +345,13 @@ def make_claude_decision(args: argparse.Namespace, task: Task):
         worker="claude_cli",
         model=args.claude_model or "claude-default",
         reason=(
-            "Patch proposal delegated to an isolated Claude CLI workspace."
+            "Patch proposal delegated to an isolated Claude CLI workspace"
             if task.constraints.mode == TaskMode.PATCH
-            else "Read-only task delegated to Claude CLI external harness."
+            else "Read-only task delegated to Claude CLI external harness"
+        )
+        + (
+            f"; external_policy={task.constraints.external_policy.value}, "
+            f"data_classification={task.constraints.data_classification.value}."
         ),
     )
 
@@ -453,6 +516,12 @@ def async_task_command(args: argparse.Namespace) -> int:
     memory_path = Path(args.memory).expanduser().resolve()
     store = AsyncTaskStore(memory_path)
     if args.async_command == "start":
+        policy_error = external_transfer_error(
+            args.backend, args.external_policy, args.data_classification
+        )
+        if policy_error:
+            print(f"config error: {policy_error}")
+            return 2
         if args.interval <= 0:
             print("config error: --interval must be greater than zero")
             return 2
@@ -484,6 +553,8 @@ def async_task_command(args: argparse.Namespace) -> int:
             callback_mode="codex_resume" if callback_mode == "codex-resume" else "none",
             claude_command=args.claude_command,
             codex_command=args.codex_command,
+            external_policy=args.external_policy,
+            data_classification=args.data_classification,
         )
         store.create(config)
         if args.foreground:

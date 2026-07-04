@@ -13,6 +13,18 @@ class TaskMode(str, Enum):
     PATCH = "patch"
 
 
+class ExternalPolicy(str, Enum):
+    NEVER = "never"
+    ASK = "ask"
+    ALLOW = "allow"
+
+
+class DataClassification(str, Enum):
+    PRIVATE = "private"
+    PUBLIC = "public"
+    SYNTHETIC = "synthetic"
+
+
 class Difficulty(str, Enum):
     SIMPLE = "simple"
     MEDIUM = "medium"
@@ -31,6 +43,8 @@ class TaskConstraints:
     max_runtime_sec: int = 900
     allow_network: bool = False
     max_output_chars: int = 12000
+    external_policy: ExternalPolicy = ExternalPolicy.ASK
+    data_classification: DataClassification = DataClassification.PRIVATE
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -38,6 +52,8 @@ class TaskConstraints:
             "max_runtime_sec": self.max_runtime_sec,
             "allow_network": self.allow_network,
             "max_output_chars": self.max_output_chars,
+            "external_policy": self.external_policy.value,
+            "data_classification": self.data_classification.value,
         }
 
 

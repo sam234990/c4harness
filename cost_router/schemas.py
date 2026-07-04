@@ -1,8 +1,10 @@
 """Backward-compatible task and result contracts."""
 
 from .core.contracts import (
+    DataClassification,
     Difficulty,
     Evidence,
+    ExternalPolicy,
     Risk,
     RouteDecision,
     Task,
@@ -15,8 +17,10 @@ from .core.contracts import (
 )
 
 __all__ = [
+    "DataClassification",
     "Difficulty",
     "Evidence",
+    "ExternalPolicy",
     "Risk",
     "RouteDecision",
     "Task",

@@ -1,8 +1,10 @@
 """Stable contracts shared by C4Harness modules."""
 
 from .contracts import (
+    DataClassification,
     Difficulty,
     Evidence,
+    ExternalPolicy,
     Risk,
     RouteDecision,
     Task,
@@ -36,9 +38,11 @@ from .graph import (
 
 __all__ = [
     "AcceptanceCriterion",
+    "DataClassification",
     "DecompositionPlan",
     "Difficulty",
     "Evidence",
+    "ExternalPolicy",
     "ExecutionMode",
     "ExecutionShape",
     "GraphEdge",

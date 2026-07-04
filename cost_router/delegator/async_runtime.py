@@ -54,6 +54,8 @@ class AsyncTaskConfig:
     callback_mode: str = "none"
     claude_command: str = "claude"
     codex_command: str = "codex"
+    external_policy: str = "ask"
+    data_classification: str = "private"
     id: str = field(default_factory=lambda: f"async_{uuid4().hex[:12]}")
 
     def to_record(self) -> dict[str, Any]:
@@ -74,6 +76,8 @@ class AsyncTaskConfig:
             "callback_mode": self.callback_mode,
             "claude_command": self.claude_command,
             "codex_command": self.codex_command,
+            "external_policy": self.external_policy,
+            "data_classification": self.data_classification,
         }
 
     @classmethod
@@ -95,6 +99,8 @@ class AsyncTaskConfig:
             callback_mode=record.get("callback_mode") or "none",
             claude_command=record.get("claude_command") or "claude",
             codex_command=record.get("codex_command") or "codex",
+            external_policy=record.get("external_policy") or "ask",
+            data_classification=record.get("data_classification") or "private",
         )
 
 
@@ -120,12 +126,12 @@ class AsyncTaskStore:
                   id, goal, repo, backend, model, workload_command_json, log_paths_json,
                   interval_sec, max_runtime_sec, success_file, failure_file,
                   source_thread_id, source_harness, callback_mode,
-                  claude_command, codex_command
+                  claude_command, codex_command, external_policy, data_classification
                 ) VALUES (
                   :id, :goal, :repo, :backend, :model, :workload_command_json,
                   :log_paths_json, :interval_sec, :max_runtime_sec, :success_file,
                   :failure_file, :source_thread_id, :source_harness, :callback_mode,
-                  :claude_command, :codex_command
+                  :claude_command, :codex_command, :external_policy, :data_classification
                 )
                 """,
                 values,
@@ -647,6 +653,7 @@ def _callback_requested(config: AsyncTaskConfig, event_type: str) -> bool:
 
 def _worker_prompt(config: AsyncTaskConfig, snapshot: str, event_hint: str) -> str:
     return f"""You are the persistent worker for an asynchronous software task.
+Transfer authorization: external_policy={config.external_policy}, data_classification={config.data_classification}.
 Assess only the supplied runtime snapshot. Do not claim to have read other files or run commands.
 Return the requested structured object. Use `needs_input` only when human or orchestrator input is
 actually required, and `stalled` only when the evidence shows progress has stopped. Runtime process
