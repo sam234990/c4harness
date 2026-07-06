@@ -25,8 +25,8 @@ A cost-aware coding-agent router for delegating bounded work from a main Codex s
 > **C4Harness is experimental.** Claude CLI delegation, read-only Codex
 > subagents, bounded patch proposals, shared-memory persistence, and the local
 > dashboard work today. Generic asynchronous workloads can also be monitored by
-> a resumable Claude session and returned to Codex on significant or terminal
-> events. Explainable decomposition preview is now available; graph execution,
+> a resumable Claude session; significant and terminal events are stored in the
+> durable C4 Inbox and surfaced by the Dashboard. Explainable decomposition preview is now available; graph execution,
 > automatic scheduling, and fallback remain roadmap items.
 
 ## Project Status
@@ -38,7 +38,7 @@ A cost-aware coding-agent router for delegating bounded work from a main Codex s
 | Write isolation | **Working** | Staged workspace, explicit write allowlist, patch output |
 | Token ledger and dashboard | **Working** | Global SQLite ledger, usage charts, call details |
 | Shared memory graph | **Prototype** | Control, worker, context, artifact, event, and lock records |
-| Async worker runtime | **Prototype** | Detached workload, resumable Claude checks, terminal Codex callback |
+| Async worker runtime | **Prototype** | Detached workload, resumable Claude checks, durable Inbox notifications |
 | Task decomposition | **Prototype** | Contract graph preview, capability assignment, confidence, risk, and history snapshot |
 | Automatic routing and fallback | **Planned** | Backend selection is still explicit |
 | OpenCode / other harnesses | **Planned** | Dashboard schema is ready; runtime adapter is not |
@@ -54,6 +54,11 @@ Inspect each call's parent task, worker task, model, verification result, token
 breakdown, raw output, and proposed patch.
 
 ![C4Harness call logs and detail drawer](assets/dashboard-call-logs.png)
+
+The Dashboard also acts as the notification surface for asynchronous work. Its
+overview highlights unread terminal results and running jobs; the Async Tasks
+page groups them by the originating Codex thread and lets the user mark results
+as handled.
 
 ## Target Architecture
 
@@ -176,7 +181,7 @@ user. The summary should identify, as applicable:
 - whether the worker receives read, shell, network, or staged-write access;
 - possible exposure of secrets, personal data, proprietary code, or unrelated
   repository content;
-- the write allowlist, expected outputs, callback behavior, and the practical
+- the write allowlist, expected outputs, Inbox behavior, and the practical
   impact of a compromised or incorrect worker.
 
 Codex should then wait for explicit confirmation. After confirmation, it may
@@ -345,9 +350,9 @@ cost-router async-task start \
   --interval 60
 ```
 
-The default `--callback auto` is intentionally inbox-only. Normal completion,
+Inbox delivery is intentionally local and durable. Normal completion,
 failure, cancellation, timeout, and requests for input are queued locally and
-can be inspected and acknowledged without starting another Codex model turn.
+can be inspected in the Dashboard or acknowledged without starting another Codex model turn.
 The Python runtime compares file size and modification time first; unchanged
 logs do not call Claude, and repeated idle checks use bounded exponential
 backoff.
@@ -358,14 +363,13 @@ cost-router async-task events async_123456789abc
 cost-router async-task inbox --unread-only
 cost-router async-task ack 42
 cost-router async-task stop async_123456789abc
-cost-router async-task retry-callbacks async_123456789abc
 ```
 
-`--callback codex-resume` remains an explicit compatibility option. It launches
-a separate, read-only `codex exec resume` process. A successful exit is recorded
-as `callback_executed`, not `delivered`, because it does not prove that the
-currently visible IDE/App conversation received the message. Only a host adapter
-that returns an acknowledgement may mark an event as acknowledged/delivered.
+Codex currently exposes no public interface that lets an external worker wake
+the currently visible IDE conversation and confirm delivery. C4Harness therefore
+does not start a second `codex exec resume` process. Results remain unread in the
+Inbox until the user asks Codex to inspect them or marks them handled in the
+Dashboard.
 
 The deterministic Python runtime process handles scheduling and decides process
 exit, marker files, timeout, and cancellation. It does not use model tokens.
@@ -432,7 +436,7 @@ Estimates use file byte size / 4 as a rough token proxy. Very small tasks may re
 - [x] Preview and persist an explainable task-contract graph without executing it.
 - [ ] Add dependency-aware parallel and sequential worker scheduling.
 - [ ] Route by task difficulty, risk, context size, model capability, and policy.
-- [ ] Add retry budgets, fallback chains, and callback delivery policies.
+- [ ] Add retry budgets, fallback chains, and Inbox retention/attention policies.
 
 **Shared memory and files**
 
@@ -449,6 +453,8 @@ Estimates use file byte size / 4 as a rough token proxy. Very small tasks may re
 
 **Harness ecosystem**
 
+- [ ] Detect installed harnesses, configured model aliases, effective tools, modalities, context limits, and network policy; propose Worker profiles for user approval.
+- [ ] Separate declared model capabilities from capabilities actually delivered by the harness and C4 policy, then verify them with safe probes.
 - [ ] Implement the OpenCode adapter and cross-harness context contract.
 - [ ] Add writable Codex subagents with the same bounded-patch policy.
 - [ ] Define an adapter SDK for Aider, Roo, custom CLIs, and MCP delegators.

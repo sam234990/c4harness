@@ -176,18 +176,10 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[item.value for item in DataClassification],
         default=DataClassification.PRIVATE.value,
     )
-    async_start.add_argument("--codex-command", default="codex")
     async_start.add_argument(
-        "--callback",
-        choices=["auto", "inbox", "codex-resume", "none"],
-        default="auto",
-        help=(
-            "How significant events return: auto/inbox safely queue an event; "
-            "codex-resume explicitly runs a headless compatibility callback"
-        ),
-    )
-    async_start.add_argument(
-        "--thread-id", default=None, help="Codex thread to resume; defaults to CODEX_THREAD_ID"
+        "--thread-id",
+        default=None,
+        help="Associate the task with a Codex thread; defaults to CODEX_THREAD_ID",
     )
     async_start.add_argument("--interval", type=float, default=60.0)
     async_start.add_argument("--max-runtime", type=int, default=None)
@@ -218,13 +210,6 @@ def build_parser() -> argparse.ArgumentParser:
     async_stop = async_subparsers.add_parser("stop", help="Request task cancellation")
     async_stop.add_argument("task_id")
     async_stop.add_argument("--memory", default=str(default_memory_path()))
-
-    async_retry = async_subparsers.add_parser(
-        "retry-callbacks", help="Retry queued or failed Codex callbacks"
-    )
-    async_retry.add_argument("task_id", nargs="?")
-    async_retry.add_argument("--memory", default=str(default_memory_path()))
-    async_retry.add_argument("--json", action="store_true")
 
     async_inbox = async_subparsers.add_parser(
         "inbox", help="List durable asynchronous events awaiting attention"
@@ -652,12 +637,12 @@ def setup_command(args: argparse.Namespace) -> int:
 
 
 def async_task_command(args: argparse.Namespace) -> int:
-    from ..delegator.async_runtime import AsyncTaskConfig, AsyncTaskRuntime, AsyncTaskStore, retry_callbacks
+    from ..delegator.async_runtime import AsyncTaskConfig, AsyncTaskRuntime, AsyncTaskStore
 
     if not args.async_command:
         print(
             "usage: cost-router async-task "
-            "{start,status,list,events,stop,inbox,ack,retry-callbacks}"
+            "{start,status,list,events,stop,inbox,ack}"
         )
         return 2
     memory_path = Path(args.memory).expanduser().resolve()
@@ -686,12 +671,6 @@ def async_task_command(args: argparse.Namespace) -> int:
             return 2
         repo = Path(args.repo).expanduser().resolve()
         thread_id = args.thread_id or os.environ.get("CODEX_THREAD_ID") or None
-        callback_mode = args.callback
-        if callback_mode == "auto":
-            callback_mode = "inbox"
-        if callback_mode == "codex-resume" and not thread_id:
-            print("config error: codex-resume callback requires --thread-id or CODEX_THREAD_ID")
-            return 2
         config = AsyncTaskConfig(
             goal=args.goal,
             repo=repo,
@@ -705,13 +684,8 @@ def async_task_command(args: argparse.Namespace) -> int:
             failure_file=_resolve_from_repo(repo, args.failure_file) if args.failure_file else None,
             source_thread_id=thread_id,
             source_harness="codex" if thread_id else "cli",
-            callback_mode=(
-                "codex_resume"
-                if callback_mode == "codex-resume"
-                else callback_mode
-            ),
+            callback_mode="inbox",
             claude_command=args.claude_command,
-            codex_command=args.codex_command,
             external_policy=args.external_policy,
             data_classification=args.data_classification,
         )
@@ -780,11 +754,6 @@ def async_task_command(args: argparse.Namespace) -> int:
         stopped = store.request_stop(args.task_id)
         print("stop requested" if stopped else "task not found or already finished")
         return 0 if stopped else 1
-    if args.async_command == "retry-callbacks":
-        attempted, executed = retry_callbacks(memory_path, args.task_id)
-        payload = {"attempted": attempted, "callback_executed": executed}
-        _print_async_payload(payload, args.json)
-        return 0 if attempted == executed else 1
     if args.async_command == "inbox":
         payload = store.inbox(
             limit=args.limit,
@@ -812,6 +781,8 @@ def _async_task_payload(store, task_id: str) -> dict | None:
 
 def _decode_async_record(record: dict) -> dict:
     payload = dict(record)
+    payload["delivery_mode"] = payload.pop("callback_mode", "inbox")
+    payload.pop("codex_command", None)
     payload["workload_command"] = json.loads(payload.pop("workload_command_json"))
     payload["log_paths"] = json.loads(payload.pop("log_paths_json"))
     payload["stop_requested"] = bool(payload["stop_requested"])

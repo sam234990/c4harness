@@ -17,10 +17,7 @@ from cost_router.delegator.async_runtime import (
     AsyncTaskConfig,
     AsyncTaskRuntime,
     AsyncTaskStore,
-    CallbackOutcome,
     _next_backoff_interval,
-    deliver_callback,
-    retry_callbacks,
 )
 from cost_router.cli import main
 
@@ -59,6 +56,8 @@ class AsyncTaskTests(unittest.TestCase):
                 )
             self.assertEqual(exit_code, 0)
             payload = json.loads(output.getvalue())
+            self.assertEqual(payload["delivery_mode"], "inbox")
+            self.assertNotIn("codex_command", payload)
             store = AsyncTaskStore(memory)
             deadline = time.time() + 5
             while time.time() < deadline:
@@ -107,12 +106,11 @@ class AsyncTaskTests(unittest.TestCase):
             workload_log = memory.parent / "async-tasks" / config.id / "workload.log"
             self.assertIn("finished", workload_log.read_text(encoding="utf-8"))
 
-    def test_claude_session_is_resumed_and_compatibility_callback_is_not_delivered(self) -> None:
+    def test_claude_session_is_resumed_and_terminal_result_enters_inbox(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             memory = root / "memory.sqlite3"
             claude_trace = root / "claude-trace.jsonl"
-            codex_trace = root / "codex-trace.jsonl"
             fake_claude = executable(
                 root / "fake-claude",
                 f"""
@@ -133,17 +131,6 @@ class AsyncTaskTests(unittest.TestCase):
                 }}))
                 """,
             )
-            fake_codex = executable(
-                root / "fake-codex",
-                f"""
-                #!{sys.executable}
-                import json, pathlib, sys
-                trace = pathlib.Path({str(codex_trace)!r})
-                with trace.open('a', encoding='utf-8') as handle:
-                    handle.write(json.dumps(sys.argv[1:]) + '\\n')
-                print('callback accepted')
-                """,
-            )
             config = AsyncTaskConfig(
                 goal="run a long generic job",
                 repo=root,
@@ -157,9 +144,8 @@ class AsyncTaskTests(unittest.TestCase):
                 interval_sec=0.05,
                 source_thread_id="thread-test",
                 source_harness="codex",
-                callback_mode="codex_resume",
+                callback_mode="inbox",
                 claude_command=str(fake_claude),
-                codex_command=str(fake_codex),
             )
             store = AsyncTaskStore(memory)
             store.create(config)
@@ -170,19 +156,10 @@ class AsyncTaskTests(unittest.TestCase):
             self.assertIn("--session-id", calls[0])
             self.assertTrue(any("--resume" in call for call in calls[1:]))
 
-            callbacks = [json.loads(line) for line in codex_trace.read_text().splitlines()]
-            self.assertEqual(len(callbacks), 1)
-            self.assertEqual(callbacks[0][:2], ["exec", "resume"])
-            self.assertIn('sandbox_mode="read-only"', callbacks[0])
-            self.assertIn("thread-test", callbacks[0])
-            self.assertTrue(any("task.completed" in item for item in callbacks[0]))
-
             events = store.events(config.id)
             completed = [item for item in events if item["event_type"] == "task.completed"]
             self.assertEqual(len(completed), 1)
-            self.assertEqual(completed[0]["callback_status"], "callback_executed")
-            self.assertIsNone(completed[0]["delivered_at"])
-            self.assertEqual(retry_callbacks(memory, config.id), (0, 0))
+            self.assertEqual(completed[0]["inbox_status"], "unread")
 
             inbox = store.inbox(unread_only=True)
             self.assertEqual(len(inbox), 1)
@@ -238,41 +215,39 @@ class AsyncTaskTests(unittest.TestCase):
             self.assertEqual(inbox[0]["status"], "unread")
             event_id = inbox[0]["event_id"]
             event = next(item for item in store.events(config.id) if item["id"] == event_id)
-            self.assertEqual(event["callback_status"], "queued")
+            self.assertEqual(event["inbox_status"], "unread")
             self.assertTrue(store.acknowledge_inbox(inbox[0]["id"]))
             self.assertEqual(store.inbox()[0]["status"], "acknowledged")
             event = next(item for item in store.events(config.id) if item["id"] == event_id)
-            self.assertEqual(event["callback_status"], "acknowledged")
+            self.assertEqual(event["inbox_status"], "acknowledged")
 
-    def test_acknowledging_host_adapter_can_mark_event_acknowledged(self) -> None:
-        class AcknowledgingNotifier:
-            def notify(self, config, event, message):
-                return CallbackOutcome("acknowledged", output="host ack")
-
+    def test_dashboard_snapshot_groups_tasks_by_thread_and_acknowledges_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             memory = root / "memory.sqlite3"
             config = AsyncTaskConfig(
-                goal="host callback",
+                goal="grouped inbox task",
                 repo=root,
                 workload_command=[sys.executable, "-c", "pass"],
                 backend="none",
                 source_thread_id="thread-host",
-                callback_mode="codex_resume",
+                callback_mode="inbox",
             )
             store = AsyncTaskStore(memory)
             store.create(config)
-            event, _ = store.record_event(
+            store.record_event(
                 config.id,
                 "task.completed",
                 "task.completed",
                 {"status": "completed", "summary": "done"},
-                request_callback=True,
+                request_inbox=True,
             )
-            self.assertTrue(deliver_callback(store, config, event, AcknowledgingNotifier()))
-            updated = store.events(config.id)[0]
-            self.assertEqual(updated["callback_status"], "acknowledged")
-            self.assertIsNotNone(updated["delivered_at"])
+            snapshot = store.dashboard_snapshot()
+            self.assertEqual(snapshot["summary"]["unread_tasks"], 1)
+            self.assertEqual(snapshot["groups"][0]["thread_id"], "thread-host")
+            self.assertEqual(snapshot["groups"][0]["unread_tasks"], 1)
+            self.assertEqual(store.acknowledge_task(config.id), 1)
+            self.assertEqual(store.dashboard_snapshot()["summary"]["unread_tasks"], 0)
 
     def test_failed_workload_emits_failed_terminal_event(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

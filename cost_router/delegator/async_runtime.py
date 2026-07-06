@@ -10,7 +10,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 from uuid import uuid4
 
 from ..core.contracts import (
@@ -26,7 +26,7 @@ from ..usage import extract_token_usage
 
 
 TERMINAL_STATES = {"completed", "failed", "cancelled", "timed_out"}
-CALLBACK_EVENT_TYPES = {
+INBOX_EVENT_TYPES = {
     "task.completed",
     "task.failed",
     "task.cancelled",
@@ -51,9 +51,8 @@ class AsyncTaskConfig:
     failure_file: Path | None = None
     source_thread_id: str | None = None
     source_harness: str = "cli"
-    callback_mode: str = "none"
+    callback_mode: str = "inbox"
     claude_command: str = "claude"
-    codex_command: str = "codex"
     external_policy: str = "ask"
     data_classification: str = "private"
     id: str = field(default_factory=lambda: f"async_{uuid4().hex[:12]}")
@@ -75,7 +74,6 @@ class AsyncTaskConfig:
             "source_harness": self.source_harness,
             "callback_mode": self.callback_mode,
             "claude_command": self.claude_command,
-            "codex_command": self.codex_command,
             "external_policy": self.external_policy,
             "data_classification": self.data_classification,
         }
@@ -96,9 +94,8 @@ class AsyncTaskConfig:
             failure_file=Path(record["failure_file"]) if record.get("failure_file") else None,
             source_thread_id=record.get("source_thread_id"),
             source_harness=record.get("source_harness") or "cli",
-            callback_mode=record.get("callback_mode") or "none",
+            callback_mode=record.get("callback_mode") or "inbox",
             claude_command=record.get("claude_command") or "claude",
-            codex_command=record.get("codex_command") or "codex",
             external_policy=record.get("external_policy") or "ask",
             data_classification=record.get("data_classification") or "private",
         )
@@ -110,26 +107,6 @@ class WorkerObservation:
     summary: str
     recommended_action: str = ""
     token_usage: Any = None
-
-
-@dataclass(slots=True)
-class CallbackOutcome:
-    """Result of notifying a host about an inbox event.
-
-    ``callback_executed`` means only that a compatibility command exited
-    successfully.  ``acknowledged`` is reserved for adapters that receive an
-    explicit acknowledgement from the host displaying the conversation.
-    """
-
-    status: str
-    error: str | None = None
-    output: str = ""
-
-
-class CallbackNotifier(Protocol):
-    def notify(
-        self, config: "AsyncTaskConfig", event: dict[str, Any], message: str
-    ) -> CallbackOutcome: ...
 
 
 class AsyncTaskStore:
@@ -146,12 +123,12 @@ class AsyncTaskStore:
                   id, goal, repo, backend, model, workload_command_json, log_paths_json,
                   interval_sec, max_runtime_sec, success_file, failure_file,
                   source_thread_id, source_harness, callback_mode,
-                  claude_command, codex_command, external_policy, data_classification
+                  claude_command, external_policy, data_classification
                 ) VALUES (
                   :id, :goal, :repo, :backend, :model, :workload_command_json,
                   :log_paths_json, :interval_sec, :max_runtime_sec, :success_file,
                   :failure_file, :source_thread_id, :source_harness, :callback_mode,
-                  :claude_command, :codex_command, :external_policy, :data_classification
+                  :claude_command, :external_policy, :data_classification
                 )
                 """,
                 values,
@@ -229,9 +206,9 @@ class AsyncTaskStore:
         event_type: str,
         payload: dict[str, Any],
         *,
-        request_callback: bool = False,
+        request_inbox: bool = False,
     ) -> tuple[dict[str, Any], bool]:
-        callback_status = "queued" if request_callback else "not_requested"
+        callback_status = "queued" if request_inbox else "not_requested"
         with sqlite3.connect(self.path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
@@ -246,7 +223,7 @@ class AsyncTaskStore:
                 "SELECT * FROM async_task_events WHERE task_id = ? AND event_key = ?",
                 (task_id, event_key),
             ).fetchone()
-            if request_callback and row is not None:
+            if request_inbox and row is not None:
                 task = conn.execute(
                     "SELECT source_thread_id FROM async_tasks WHERE id = ?", (task_id,)
                 ).fetchone()
@@ -316,8 +293,7 @@ class AsyncTaskStore:
                 """
                 UPDATE async_task_events
                 SET callback_status = 'acknowledged',
-                    acknowledged_at = CURRENT_TIMESTAMP,
-                    delivered_at = CURRENT_TIMESTAMP
+                    acknowledged_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                   AND callback_status IN (
                     'queued', 'pending', 'callback_executed', 'failed'
@@ -326,6 +302,133 @@ class AsyncTaskStore:
                 (row["event_id"],),
             )
         return True
+
+    def acknowledge_task(self, task_id: str) -> int:
+        """Acknowledge every unread inbox event for one asynchronous task."""
+
+        with sqlite3.connect(self.path) as conn:
+            rows = conn.execute(
+                "SELECT event_id FROM async_task_inbox "
+                "WHERE task_id = ? AND status = 'unread'",
+                (task_id,),
+            ).fetchall()
+            if not rows:
+                return 0
+            event_ids = [int(row[0]) for row in rows]
+            conn.execute(
+                """
+                UPDATE async_task_inbox
+                SET status = 'acknowledged', acknowledged_at = CURRENT_TIMESTAMP
+                WHERE task_id = ? AND status = 'unread'
+                """,
+                (task_id,),
+            )
+            placeholders = ",".join("?" for _ in event_ids)
+            conn.execute(
+                f"""
+                UPDATE async_task_events
+                SET callback_status = 'acknowledged',
+                    acknowledged_at = CURRENT_TIMESTAMP
+                WHERE id IN ({placeholders})
+                """,
+                event_ids,
+            )
+        return len(event_ids)
+
+    def dashboard_snapshot(self, limit: int = 200) -> dict[str, Any]:
+        """Return task and unread-inbox state grouped by originating thread."""
+
+        with sqlite3.connect(self.path) as conn:
+            conn.row_factory = sqlite3.Row
+            task_rows = conn.execute(
+                "SELECT * FROM async_tasks ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+            task_ids = [str(row["id"]) for row in task_rows]
+            inbox_rows: list[sqlite3.Row] = []
+            if task_ids:
+                placeholders = ",".join("?" for _ in task_ids)
+                inbox_rows = conn.execute(
+                    f"""
+                    SELECT * FROM async_task_inbox
+                    WHERE task_id IN ({placeholders})
+                    ORDER BY created_at DESC, id DESC
+                    """,
+                    task_ids,
+                ).fetchall()
+
+        inbox_by_task: dict[str, list[dict[str, Any]]] = {}
+        for row in inbox_rows:
+            item = dict(row)
+            item["payload"] = json.loads(item.pop("payload_json"))
+            inbox_by_task.setdefault(str(item["task_id"]), []).append(item)
+
+        grouped: dict[str, dict[str, Any]] = {}
+        running_total = 0
+        unread_completed = 0
+        unread_failed = 0
+        unread_tasks = 0
+        for row in task_rows:
+            task = dict(row)
+            task["delivery_mode"] = task.pop("callback_mode", "inbox")
+            task.pop("codex_command", None)
+            task_id = str(task["id"])
+            notifications = inbox_by_task.get(task_id, [])
+            unread = [item for item in notifications if item["status"] == "unread"]
+            task["unread_count"] = len(unread)
+            task["notifications"] = notifications
+            task["latest_notification"] = unread[0] if unread else (
+                notifications[0] if notifications else None
+            )
+            if task["status"] in {"pending", "running"}:
+                running_total += 1
+            if unread:
+                unread_tasks += 1
+                event_types = {str(item["event_type"]) for item in unread}
+                if "task.completed" in event_types:
+                    unread_completed += 1
+                if event_types & {
+                    "task.failed",
+                    "task.timed_out",
+                    "worker.reported_failure",
+                    "worker.stalled",
+                }:
+                    unread_failed += 1
+
+            thread_id = task.get("source_thread_id") or "unattached"
+            group = grouped.setdefault(
+                thread_id,
+                {
+                    "thread_id": thread_id,
+                    "source_harness": task.get("source_harness") or "cli",
+                    "unread_tasks": 0,
+                    "running_tasks": 0,
+                    "completed_tasks": 0,
+                    "tasks": [],
+                },
+            )
+            group["unread_tasks"] += int(bool(unread))
+            group["running_tasks"] += int(task["status"] in {"pending", "running"})
+            group["completed_tasks"] += int(task["status"] in TERMINAL_STATES)
+            group["tasks"].append(task)
+
+        groups = list(grouped.values())
+        groups.sort(
+            key=lambda group: (
+                group["unread_tasks"] == 0,
+                group["running_tasks"] == 0,
+                -(group["unread_tasks"] + group["running_tasks"]),
+            )
+        )
+        return {
+            "summary": {
+                "running": running_total,
+                "unread_tasks": unread_tasks,
+                "unread_completed": unread_completed,
+                "unread_failed": unread_failed,
+                "total": len(task_rows),
+            },
+            "groups": groups,
+        }
 
     def events(self, task_id: str, limit: int = 100) -> list[dict[str, Any]]:
         with sqlite3.connect(self.path) as conn:
@@ -338,67 +441,6 @@ class AsyncTaskStore:
                 (task_id, limit),
             ).fetchall()
         return [_event_dict(row) for row in rows]
-
-    def pending_callbacks(self, task_id: str | None = None) -> list[dict[str, Any]]:
-        query = (
-            "SELECT * FROM async_task_events "
-            "WHERE callback_status IN ('queued', 'pending', 'failed')"
-        )
-        params: tuple[Any, ...] = ()
-        if task_id:
-            query += " AND task_id = ?"
-            params = (task_id,)
-        query += " ORDER BY id"
-        with sqlite3.connect(self.path) as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(query, params).fetchall()
-        return [_event_dict(row) for row in rows]
-
-    def claim_callback(self, event_id: int) -> bool:
-        with sqlite3.connect(self.path) as conn:
-            cursor = conn.execute(
-                """
-                UPDATE async_task_events
-                SET callback_status = 'executing'
-                WHERE id = ? AND callback_status IN ('queued', 'pending', 'failed')
-                """,
-                (event_id,),
-            )
-        return cursor.rowcount == 1
-
-    def finish_callback(self, event_id: int, outcome: CallbackOutcome) -> None:
-        if outcome.status not in {"callback_executed", "acknowledged", "delivered", "failed"}:
-            raise ValueError(f"Unsupported callback outcome: {outcome.status}")
-        executed = (
-            ", executed_at = CURRENT_TIMESTAMP"
-            if outcome.status in {"callback_executed", "acknowledged", "delivered"}
-            else ""
-        )
-        acknowledged = (
-            ", acknowledged_at = CURRENT_TIMESTAMP, delivered_at = CURRENT_TIMESTAMP"
-            if outcome.status in {"acknowledged", "delivered"}
-            else ""
-        )
-        with sqlite3.connect(self.path) as conn:
-            conn.execute(
-                f"""
-                UPDATE async_task_events
-                SET callback_status = ?, callback_attempts = callback_attempts + 1,
-                    callback_error = ?{executed}{acknowledged}
-                WHERE id = ?
-                """,
-                (outcome.status, outcome.error, event_id),
-            )
-            if outcome.status in {"acknowledged", "delivered"}:
-                conn.execute(
-                    """
-                    UPDATE async_task_inbox
-                    SET status = 'acknowledged', acknowledged_at = CURRENT_TIMESTAMP
-                    WHERE event_id = ?
-                    """,
-                    (event_id,),
-                )
-
 
 class ClaudeWorkerSession:
     def __init__(self, config: AsyncTaskConfig, store: AsyncTaskStore) -> None:
@@ -587,7 +629,7 @@ class AsyncTaskRuntime:
                             workload_exit_code=exit_code,
                             last_worker_summary=summary,
                         )
-                        event, inserted = self.store.record_event(
+                        self.store.record_event(
                             config.id,
                             event_type,
                             event_type,
@@ -600,10 +642,8 @@ class AsyncTaskRuntime:
                                 ),
                                 "workload_exit_code": exit_code,
                             },
-                            request_callback=_callback_requested(config, event_type),
+                            request_inbox=_inbox_requested(config, event_type),
                         )
-                        if inserted and event["callback_status"] == "queued":
-                            deliver_callback(self.store, config, event)
                         return 0 if status == "completed" else 1
 
                     now = time.monotonic()
@@ -625,15 +665,13 @@ class AsyncTaskRuntime:
             if process and process.poll() is None:
                 _terminate_process(process)
             self.store.update(config.id, status="failed", last_worker_summary=str(error))
-            event, inserted = self.store.record_event(
+            self.store.record_event(
                 config.id,
                 "task.failed",
                 "task.failed",
                 {"status": "failed", "reason": "runtime_error", "summary": str(error)},
-                request_callback=_callback_requested(config, "task.failed"),
+                request_inbox=_inbox_requested(config, "task.failed"),
             )
-            if inserted and event["callback_status"] == "queued":
-                deliver_callback(self.store, config, event)
             return 1
 
     def _terminal_state(
@@ -684,18 +722,18 @@ class AsyncTaskRuntime:
             f"{observation.status}\0{observation.summary}".encode("utf-8")
         ).hexdigest()[:12]
         event_type = "worker.observation"
-        request_callback = False
+        request_inbox = False
         if observation.status == "needs_input":
             event_type = "worker.needs_input"
-            request_callback = True
+            request_inbox = True
         elif observation.status == "stalled":
             event_type = "worker.stalled"
-            request_callback = True
+            request_inbox = True
         elif observation.status == "failed":
             event_type = "worker.reported_failure"
-            request_callback = True
-        event_key = event_type if request_callback else f"observation:{digest}:{uuid4().hex}"
-        event, inserted = self.store.record_event(
+            request_inbox = True
+        event_key = event_type if request_inbox else f"observation:{digest}:{uuid4().hex}"
+        self.store.record_event(
             config.id,
             event_key,
             event_type,
@@ -704,10 +742,8 @@ class AsyncTaskRuntime:
                 "summary": observation.summary,
                 "recommended_action": observation.recommended_action,
             },
-            request_callback=request_callback and _callback_requested(config, event_type),
+            request_inbox=request_inbox and _inbox_requested(config, event_type),
         )
-        if inserted and event["callback_status"] == "queued":
-            deliver_callback(self.store, config, event)
 
 
 def build_snapshot(config: AsyncTaskConfig, workload_log: Path) -> str:
@@ -737,97 +773,8 @@ def _next_backoff_interval(base: float, current: float) -> float:
     return min(max(base, current * 2), max(base, min(300.0, base * 16)))
 
 
-class CodexExecNotifier:
-    """Compatibility notifier; successful execution is not a UI acknowledgement."""
-
-    def notify(
-        self, config: AsyncTaskConfig, event: dict[str, Any], message: str
-    ) -> CallbackOutcome:
-        completed = subprocess.run(
-            [
-                config.codex_command,
-                "exec",
-                "resume",
-                "-c",
-                'sandbox_mode="read-only"',
-                "-c",
-                'approval_policy="never"',
-                config.source_thread_id or "",
-                message,
-            ],
-            cwd=config.repo,
-            env=os.environ.copy(),
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=1800,
-            check=False,
-        )
-        if completed.returncode == 0:
-            return CallbackOutcome("callback_executed", output=completed.stdout)
-        return CallbackOutcome(
-            "failed",
-            error=_truncate(completed.stdout, 2000),
-            output=completed.stdout,
-        )
-
-
-def deliver_callback(
-    store: AsyncTaskStore,
-    config: AsyncTaskConfig,
-    event: dict[str, Any],
-    notifier: CallbackNotifier | None = None,
-) -> bool:
-    if config.callback_mode != "codex_resume" or not config.source_thread_id:
-        return False
-    if not store.claim_callback(event["id"]):
-        return False
-    payload = event["payload"]
-    message = "\n".join(
-        [
-            f"Cost Router async task `{config.id}` emitted `{event['event_type']}`.",
-            f"Goal: {config.goal}",
-            f"Status: {payload.get('status') or payload.get('worker_status') or 'unknown'}",
-            f"Summary: {payload.get('summary') or payload.get('reason') or 'No summary'}",
-            f"Recommended action: {payload.get('recommended_action') or 'Review the event and respond.'}",
-            f"Repository: {config.repo}",
-            "This is a compatibility notification, not proof that a visible UI received it.",
-            "Do not modify files or run commands. Briefly acknowledge the event only.",
-        ]
-    )
-    task_dir = _task_dir(store.path, config.id)
-    task_dir.mkdir(parents=True, exist_ok=True)
-    callback_log = task_dir / f"callback-{event['id']}.log"
-    try:
-        outcome = (notifier or CodexExecNotifier()).notify(config, event, message)
-        callback_log.write_text(outcome.output or outcome.error or "", encoding="utf-8")
-    except Exception as exc:
-        outcome = CallbackOutcome("failed", error=str(exc), output=str(exc))
-        callback_log.write_text(outcome.output, encoding="utf-8")
-    store.finish_callback(event["id"], outcome)
-    return outcome.status in {"callback_executed", "acknowledged", "delivered"}
-
-
-def retry_callbacks(memory_path: Path, task_id: str | None = None) -> tuple[int, int]:
-    store = AsyncTaskStore(memory_path)
-    attempted = executed = 0
-    for event in store.pending_callbacks(task_id):
-        record = store.get(event["task_id"])
-        if not record:
-            continue
-        config = AsyncTaskConfig.from_record(record)
-        if config.callback_mode != "codex_resume":
-            continue
-        attempted += 1
-        executed += int(deliver_callback(store, config, event))
-    return attempted, executed
-
-
-def _callback_requested(config: AsyncTaskConfig, event_type: str) -> bool:
-    return (
-        config.callback_mode in {"inbox", "codex_resume"}
-        and event_type in CALLBACK_EVENT_TYPES
-    )
+def _inbox_requested(config: AsyncTaskConfig, event_type: str) -> bool:
+    return config.callback_mode == "inbox" and event_type in INBOX_EVENT_TYPES
 
 
 def _worker_prompt(config: AsyncTaskConfig, snapshot: str, event_hint: str) -> str:
@@ -876,6 +823,19 @@ def _parse_claude_payload(raw: str) -> dict[str, Any]:
 def _event_dict(row: sqlite3.Row) -> dict[str, Any]:
     item = dict(row)
     item["payload"] = json.loads(item.pop("payload_json"))
+    legacy_status = item.pop("callback_status", "not_requested")
+    item["inbox_status"] = {
+        "queued": "unread",
+        "acknowledged": "acknowledged",
+        "not_requested": "not_queued",
+    }.get(legacy_status, legacy_status)
+    for field in (
+        "callback_attempts",
+        "callback_error",
+        "executed_at",
+        "delivered_at",
+    ):
+        item.pop(field, None)
     return item
 
 

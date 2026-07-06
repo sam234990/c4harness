@@ -98,7 +98,7 @@ c4harness/
 │   │   ├── workspace.py                   # staged copy/worktree preparation
 │   │   ├── sessions.py                    # persistent harness sessions
 │   │   ├── async_runtime.py               # long-running workload monitoring
-│   │   ├── callbacks.py                   # Codex resume and terminal event delivery
+│   │   ├── inbox.py                       # durable terminal/significant event delivery
 │   │   └── backends/
 │   │       ├── __init__.py
 │   │       ├── base.py                    # backend protocol and PreparedWorker
@@ -163,7 +163,7 @@ c4harness/
 │   │   ├── __init__.py
 │   │   ├── codex/
 │   │   │   ├── setup.py                   # Codex-specific setup hints
-│   │   │   └── callbacks.py               # thread resume integration
+│   │   │   └── inbox.py                   # Codex-facing Inbox integration
 │   │   └── mcp/                           # future MCP server surface
 │   │       ├── __init__.py
 │   │       ├── server.py
@@ -283,7 +283,7 @@ c4harness/
 - backend/harness 协议适配。
 - staging workspace、命令准备和进程生命周期。
 - 同步节点执行、持久 session 和异步 workload 监控。
-- Codex callback 等结果交付机制。
+- Inbox 事件持久化与结果交付机制。
 
 它不负责拆解、能力学习或最终验收。Backend 不应直接写 MemoryStore；事件由 application 统一提交。
 
@@ -352,7 +352,7 @@ Decompose Verifier Delegator  Memory
 Usage 不应继续同时承担 Token 估算、SQLite 查询和网页统计。建议分为：
 
 - `usage/tokens.py`：从 backend 输出提取真实 Token，并估算 delegated/returned/main-saved Token。
-- `usage/recorder.py`：把 route、execution、verification、callback 记录成统一 usage event。
+- `usage/recorder.py`：把 route、execution、verification、Inbox 记录成统一 usage event。
 - `usage/aggregation.py`：按日、月、backend、model、project 和 task 聚合。
 - `history/profiles.py`：从 verified outcome 形成 WorkerArm 能力统计。
 - `dashboard/queries.py`：把 history/usage 结果投影成网页需要的数据结构。

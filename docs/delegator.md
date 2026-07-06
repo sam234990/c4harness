@@ -23,7 +23,7 @@ WorkerResult + artifacts + lifecycle events
 - 创建 staged copy 或 worktree，并实施 read/write allowlist。
 - 同步进程、timeout、cancel 和结构化输出收集。
 - 持久 worker session 与 resume。
-- 异步 workload 的 observation、terminal event 和 callback delivery。
+- 异步 workload 的 observation、terminal event 和持久 Inbox 投递。
 - 将 backend 特有结果转换为统一 WorkerResult。
 
 Delegator 不负责：
@@ -56,7 +56,7 @@ start workload
   -> emit significant observations
   -> detect terminal state deterministically
   -> produce terminal summary
-  -> deliver callback once
+  -> persist one or more unread Inbox events
 ```
 
 Runtime 而非 Claude 决定 PID、exit code、timeout、cancel 和 terminal state。Claude 负责解释 observation，不得用自然语言覆盖真实进程状态。
@@ -67,9 +67,8 @@ Runtime 而非 Claude 决定 PID、exit code、timeout、cancel 和 terminal sta
 - 从 Shared Memory 读取明确授权的 Context Pack/artifact reference。
 - 将 WorkerResult 返回 Application。
 - Application 调用 Verifier，并提交 History/Memory 事件。
-- Callback 只传结构化终态摘要，避免无边界恢复超长主线程。
+- Inbox 只保存结构化终态或重要事件摘要；Dashboard 和 CLI 负责呈现与确认。
 
 ## 6. 第一版本与 Future Work
 
-第一版本保留现有同步 Claude/Codex backend、隔离 patch、async runtime 和 Codex callback。后续再实现 graph ready-frontier scheduler、并发资源限制、OpenCode adapter、可靠 callback inbox 和紧凑 thread handoff。
-
+第一版本保留现有同步 Claude/Codex backend、隔离 patch、async runtime 和可靠 Inbox。Codex 当前没有供外部 Worker 唤醒可见 IDE 对话并确认送达的公开接口，因此不实现自动唤醒。后续再实现 graph ready-frontier scheduler、并发资源限制、OpenCode adapter 和紧凑 thread handoff。

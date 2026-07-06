@@ -13,6 +13,7 @@
       <nav>
         <button class="nav-item active" data-page="overview" data-i18n="overview">总览</button>
         <button class="nav-item" data-page="calls" data-i18n="callLogs">调用日志</button>
+        <button class="nav-item nav-item-with-badge" data-page="async-tasks"><span data-i18n="asyncTasks">异步任务</span><span class="nav-badge" id="async-nav-badge" hidden>0</span></button>
         <button class="nav-item" data-page="workers" data-i18n="workerConfig">Worker 配置</button>
       </nav>
       <div class="sidebar-status">
@@ -43,6 +44,16 @@
         </div>
 
         <div class="summary-grid" id="summary-grid"></div>
+
+        <section class="async-overview" id="async-overview" hidden>
+          <div class="async-overview-copy">
+            <span class="eyebrow" data-i18n="asyncInbox">C4 Inbox</span>
+            <h2 data-i18n="asyncAttention">异步任务需要处理</h2>
+            <p data-i18n="asyncAttentionSub">Codex 当前不能被外部 Worker 自动唤醒；结果会可靠保存在这里。</p>
+          </div>
+          <div class="async-overview-counts" id="async-overview-counts"></div>
+          <button class="primary-button" id="view-async-tasks" data-i18n="openInbox">查看异步任务</button>
+        </section>
 
         <section class="provider-section">
           <div class="section-heading">
@@ -102,6 +113,18 @@
           <div class="empty-state" id="calls-empty" data-i18n="noCalls">没有匹配的调用记录</div>
         </div>
         <div class="pagination"><button id="prev-page" data-i18n="previous">上一页</button><span id="page-info"></span><button id="next-page" data-i18n="next">下一页</button></div>
+      </section>
+
+      <section class="page" id="page-async-tasks">
+        <div class="async-page-intro">
+          <div>
+            <h2 data-i18n="asyncInbox">C4 Inbox</h2>
+            <p data-i18n="asyncPageHelp">按来源 Codex 对话查看正在运行和尚未处理的异步任务。确认表示结果已被用户或 Codex 处理。</p>
+          </div>
+          <button class="secondary-button" id="refresh-async" data-i18n="refresh">刷新</button>
+        </div>
+        <div class="async-thread-list" id="async-thread-list"></div>
+        <div class="empty-state" id="async-empty" data-i18n="noAsyncTasks">暂无异步任务</div>
       </section>
 
       <section class="page" id="page-workers">

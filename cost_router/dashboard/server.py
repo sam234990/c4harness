@@ -16,6 +16,7 @@ import webbrowser
 
 from ..usage.aggregation import AnalyticsStore
 from ..config.workers import WorkerManifestStore, builtin_workers
+from ..delegator.async_runtime import AsyncTaskStore
 
 
 STATIC_TYPES = {
@@ -38,6 +39,7 @@ def serve_dashboard(
     handler = _handler(
         store,
         worker_store=WorkerManifestStore(),
+        async_store=AsyncTaskStore(memory_path),
         config_write_enabled=host in {"127.0.0.1", "::1", "localhost"},
     )
     server = ThreadingHTTPServer((host, port), handler)
@@ -59,9 +61,11 @@ def _handler(
     store: AnalyticsStore,
     *,
     worker_store: WorkerManifestStore | None = None,
+    async_store: AsyncTaskStore | None = None,
     config_write_enabled: bool = True,
 ) -> type[BaseHTTPRequestHandler]:
     workers = worker_store or WorkerManifestStore()
+    async_tasks = async_store or AsyncTaskStore(store.path)
     csrf_token = secrets.token_urlsafe(24)
 
     class DashboardHandler(BaseHTTPRequestHandler):
@@ -79,14 +83,31 @@ def _handler(
 
         def do_PUT(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
-            if parsed.path != "/api/workers":
-                self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
-                return
             if not config_write_enabled:
-                self._json({"error": "worker configuration writes require loopback binding"}, HTTPStatus.FORBIDDEN)
+                self._json(
+                    {"error": "dashboard writes require loopback binding"},
+                    HTTPStatus.FORBIDDEN,
+                )
                 return
             if self.headers.get("X-C4-CSRF") != csrf_token:
                 self._json({"error": "invalid CSRF token"}, HTTPStatus.FORBIDDEN)
+                return
+            if parsed.path.startswith("/api/async-tasks/") and parsed.path.endswith("/ack"):
+                task_id = parsed.path.removeprefix("/api/async-tasks/").removesuffix("/ack")
+                if not task_id or "/" in task_id:
+                    self._json({"error": "invalid async task id"}, HTTPStatus.BAD_REQUEST)
+                    return
+                count = async_tasks.acknowledge_task(task_id)
+                if count == 0:
+                    self._json(
+                        {"error": "task has no unread Inbox events"},
+                        HTTPStatus.NOT_FOUND,
+                    )
+                    return
+                self._json({"task_id": task_id, "acknowledged": count})
+                return
+            if parsed.path != "/api/workers":
+                self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
                 return
             try:
                 content_type = self.headers.get("Content-Type", "")
@@ -127,6 +148,10 @@ def _handler(
                     "write_enabled": config_write_enabled,
                     "path": str(workers.path),
                 }
+            elif path == "/api/async-tasks":
+                payload = async_tasks.dashboard_snapshot(
+                    limit=min(max(int(value("limit", "200")), 1), 1000)
+                )
             elif path == "/api/overview":
                 payload = store.overview(value("range", "30d"), value("timezone", "UTC"))
             elif path == "/api/timeseries":

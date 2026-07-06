@@ -9,7 +9,8 @@ import tempfile
 import threading
 import unittest
 from unittest.mock import patch
-from urllib.request import urlopen
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 from cost_router.usage.aggregation import AnalyticsStore
 from cost_router.dashboard.server import _handler
@@ -26,6 +27,7 @@ from cost_router.core.contracts import (
     WorkerResult,
 )
 from cost_router.setup_user import setup_user
+from cost_router.delegator.async_runtime import AsyncTaskConfig, AsyncTaskStore
 
 
 def decision(backend: str, model: str = "test-model") -> RouteDecision:
@@ -162,6 +164,23 @@ class DashboardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "http.sqlite3"
             MemoryStore(path).init()
+            async_store = AsyncTaskStore(path)
+            async_config = AsyncTaskConfig(
+                goal="review completed evaluation",
+                repo=Path(tmp),
+                workload_command=["true"],
+                backend="none",
+                source_thread_id="thread-dashboard",
+            )
+            async_store.create(async_config)
+            async_store.update(async_config.id, status="completed")
+            async_store.record_event(
+                async_config.id,
+                "task.completed",
+                "task.completed",
+                {"status": "completed", "summary": "evaluation finished"},
+                request_inbox=True,
+            )
             try:
                 server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(AnalyticsStore(path)))
             except PermissionError:
@@ -178,11 +197,29 @@ class DashboardTests(unittest.TestCase):
                     metadata = json.load(response)
                 with urlopen(f"{base}/api/overview?range=all", timeout=2) as response:
                     payload = json.load(response)
+                with urlopen(f"{base}/api/async-tasks", timeout=2) as response:
+                    async_payload = json.load(response)
                 self.assertIn("C4Harness Console", page)
                 self.assertTrue(icon.startswith(b"\x89PNG\r\n\x1a\n"))
                 self.assertTrue(metadata["csrf_token"])
                 self.assertTrue(metadata["worker_config_write_enabled"])
                 self.assertEqual(payload["totals"]["calls"], 0)
+                self.assertEqual(async_payload["summary"]["unread_tasks"], 1)
+                self.assertEqual(async_payload["groups"][0]["thread_id"], "thread-dashboard")
+                blocked = Request(
+                    f"{base}/api/async-tasks/{async_config.id}/ack", method="PUT"
+                )
+                with self.assertRaises(HTTPError) as caught:
+                    urlopen(blocked, timeout=2)
+                self.assertEqual(caught.exception.code, 403)
+                acknowledged = Request(
+                    f"{base}/api/async-tasks/{async_config.id}/ack",
+                    method="PUT",
+                    headers={"X-C4-CSRF": metadata["csrf_token"]},
+                )
+                with urlopen(acknowledged, timeout=2) as response:
+                    ack_payload = json.load(response)
+                self.assertEqual(ack_payload["acknowledged"], 1)
             finally:
                 server.shutdown()
                 server.server_close()
@@ -215,7 +252,7 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("name: cost-router", skill_text)
         self.assertIn("### Risk Disclosure and Consent", skill_text)
         self.assertIn("Wait for explicit user approval", skill_text)
-        self.assertIn("resuming a long Codex thread", skill_text)
+        self.assertIn("Codex is not automatically awakened", skill_text)
         self.assertIn("Retry the same bounded operation once", skill_text)
         self.assertIn('display_name: "Cost Router"', agent_text)
 

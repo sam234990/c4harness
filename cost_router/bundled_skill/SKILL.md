@@ -1,6 +1,6 @@
 ---
 name: cost-router
-description: Decompose long or context-heavy coding tasks, delegate verifiable analysis or bounded patches to lower-cost Codex or Claude CLI workers, and launch asynchronous workloads monitored by a resumable Claude session that returns significant and terminal events to Codex. Use for broad investigations, debugging, reviews, migrations, repository understanding, test-failure analysis, separable implementation, or long-running training, evaluation, build, test, data, and deployment commands. Do not use for short tasks whose delegation overhead exceeds the work.
+description: Decompose long or context-heavy coding tasks, delegate verifiable analysis or bounded patches to lower-cost Codex or Claude CLI workers, and launch asynchronous workloads monitored by a resumable Claude session that stores significant and terminal events in a durable local Inbox. Use for broad investigations, debugging, reviews, migrations, repository understanding, test-failure analysis, separable implementation, or long-running training, evaluation, build, test, data, and deployment commands. Do not use for short tasks whose delegation overhead exceeds the work.
 ---
 
 # Cost Router
@@ -28,10 +28,10 @@ For private external delegation, state all applicable risks in one concise summa
 - possible exposure of proprietary code, paths, test names, runtime metadata, errors, or user content;
 - provider-side processing, retention, logging, and policy risks that C4Harness cannot control;
 - local side effects: staged copies, patch artifacts, SQLite ledger entries, and subprocesses;
-- for async work, repeated snapshots, resumable Claude session state, callback events, and the fact that resuming a long Codex thread can consume substantial Codex tokens;
+- for async work, repeated snapshots, resumable Claude session state, durable Inbox events, and the fact that Codex is not automatically awakened;
 - confirmation that credentials and unrelated files are excluded, and that host policy may still deny the operation.
 
-Ask the user to approve this exact bounded transfer. Do not execute while confirmation is pending. A prior confirmation remains valid only for the same parent task, provider, data classification, path set, operation mode, and async/callback behavior; broadened scope requires a new summary.
+Ask the user to approve this exact bounded transfer. Do not execute while confirmation is pending. A prior confirmation remains valid only for the same parent task, provider, data classification, path set, operation mode, and async/Inbox behavior; broadened scope requires a new summary.
 
 If the host rejects an attempted external call:
 
@@ -121,7 +121,7 @@ call a model, or grant external-transfer consent.
 Use an asynchronous task when the user asks Codex to start a long-running command and have a worker monitor it after the current turn. This is suitable for training, evaluation, builds, test suites, data processing, deployments, and other workloads with observable logs or process completion.
 
 1. Confirm the exact workload command, working directory, relevant logs, and any success or failure marker files. Do not invent or silently broaden a destructive command.
-2. Identify every repeated snapshot source, the check interval, session persistence, terminal/significant callback events, callback destination, and likely main-thread Token impact. Present the async risk summary and wait for informed consent.
+2. Identify every repeated snapshot source, the check interval, session persistence, and terminal/significant Inbox events. Present the async risk summary and wait for informed consent.
 3. Start the generic runtime from the workload repository:
 
 ```bash
@@ -136,12 +136,11 @@ cost-router async-task start \
   --json
 ```
 
-4. Apply the same external delegation policy before sending log snapshots. Use `allow/private` only for the user-confirmed snapshot and callback scope; otherwise ask first or use `--backend none`.
-5. Keep the default `--callback auto`, which writes terminal/significant events to the durable local Inbox. Do not claim that this wakes the visible Codex UI. Inspect with `cost-router async-task inbox --unread-only` and acknowledge handled items with `cost-router async-task ack <inbox-id>`.
+4. Apply the same external delegation policy before sending log snapshots. Use `allow/private` only for the user-confirmed snapshot and Inbox scope; otherwise ask first or use `--backend none`.
+5. Terminal/significant events are always written to the durable local Inbox. Do not claim that this wakes the visible Codex UI. Inspect with `cost-router async-task inbox --unread-only` and acknowledge handled items with `cost-router async-task ack <inbox-id>`.
 6. Return the task ID and task directory to the user after the detached runtime process starts. Do not block the Codex turn by polling healthy progress.
 7. When the host or user surfaces an Inbox event, inspect `cost-router async-task status <task-id>` and `events <task-id>`, then decide whether to report completion, diagnose, patch, or explicitly start a replacement workload.
-8. Use `--callback codex-resume` only when the user explicitly opts into the legacy headless callback. It runs read-only and a zero exit code means only `callback_executed`, not that the current UI received the message. Use `retry-callbacks <task-id>` only for this explicit compatibility mode.
-9. Use `stop <task-id>` for cancellation.
+8. Use `stop <task-id>` for cancellation.
 
 The Python runtime process owns scheduling, process exit, timeout, marker files, and cancellation without using model tokens. It checks file metadata before invoking Claude, skips unchanged snapshots, and backs off repeated idle checks. Claude uses one resumable session only for changed snapshots and terminal summaries. Completion, failure, timeout, cancellation, stalled work, and requests for input enter the durable Inbox by default.
 
@@ -159,7 +158,7 @@ The Python runtime process owns scheduling, process exit, timeout, marker files,
 - `cost-router decompose` previews and records a contract graph; it does not execute or schedule graph nodes.
 - The router CLI executes one worker task per invocation. The main Codex session currently performs graph scheduling.
 - The async runtime owns one workload per task and uses Claude only for bounded observations and terminal summaries.
-- Inbox delivery is durable, but automatic wake-up of a currently visible IDE/App conversation requires a host adapter that provides an explicit acknowledgement. Standalone `codex exec resume` is not such an acknowledgement.
+- Inbox delivery is durable. Codex currently has no public interface through which an external worker can wake the currently visible IDE conversation and confirm delivery, so C4Harness does not attempt automatic wake-up.
 - Claude CLI supports bounded patch proposals in a staged workspace. Codex subagent delegation remains read-only.
 - Patch workers edit copies, never the target repository. The main agent reviews and applies accepted patches.
 - Multiple delegated calls are not yet executed from the persisted task-contract graph.
