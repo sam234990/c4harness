@@ -87,6 +87,31 @@ cost-router run \
 10. Inspect an accepted `proposed_patch_path` before applying it. Apply or reproduce the change in the main workspace, then run the relevant tests in the main session.
 11. Report which work was delegated and distinguish worker findings from conclusions independently verified by the main agent. The global ledger automatically associates calls with the current Codex thread when `CODEX_THREAD_ID` is available.
 
+## Decomposition Preview
+
+Use the deterministic preview before manual delegation when a task has multiple
+deliverables, a Skill workflow, capability-sensitive work, explicit risks, or
+non-trivial acceptance criteria:
+
+```bash
+cost-router decompose \
+  --goal "<root objective>" \
+  --requirement "<required deliverable>" \
+  --constraint "<non-deliverable constraint>" \
+  --acceptance "<root acceptance condition>" \
+  --active-skill "<skill name>" \
+  --skill-step "<ordered workflow step>" \
+  --repo "$PWD" \
+  --json
+```
+
+Add `--plan-mode` when the result must remain read-only. Pass only necessary
+`--path`, `--context-pack`, and `--write-path` values. Inspect the generated
+TaskSituation, root contract, graph shape, capability exclusions, assignment
+confidence, verifier plan, fallback, and security risk manifest before invoking
+any worker. This command records a plan snapshot but does not execute the graph,
+call a model, or grant external-transfer consent.
+
 ## Asynchronous Workflow
 
 Use an asynchronous task when the user asks Codex to start a long-running command and have a worker monitor it after the current turn. This is suitable for training, evaluation, builds, test suites, data processing, deployments, and other workloads with observable logs or process completion.
@@ -126,10 +151,11 @@ The Python runtime process owns scheduling, process exit, timeout, marker files,
 
 ## Current Boundaries
 
-- The router CLI executes one worker task per invocation. The main Codex session currently performs decomposition and scheduling.
+- `cost-router decompose` previews and records a contract graph; it does not execute or schedule graph nodes.
+- The router CLI executes one worker task per invocation. The main Codex session currently performs graph scheduling.
 - The async runtime owns one workload per task and uses Claude only for bounded observations and terminal summaries.
 - Claude CLI supports bounded patch proposals in a staged workspace. Codex subagent delegation remains read-only.
 - Patch workers edit copies, never the target repository. The main agent reviews and applies accepted patches.
-- Multiple delegated calls are not yet represented as one persisted task DAG.
+- Multiple delegated calls are not yet executed from the persisted task-contract graph.
 - Backend selection is explicit rather than learned or automatic.
 - Memory and verifier output assist orchestration but do not replace direct validation of high-impact claims.

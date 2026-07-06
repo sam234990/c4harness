@@ -6,6 +6,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.resources
 import json
+import secrets
 from pathlib import Path
 import threading
 from typing import Any
@@ -13,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 import webbrowser
 
 from ..usage.aggregation import AnalyticsStore
+from ..config.workers import WorkerManifestStore, builtin_workers
 
 
 STATIC_TYPES = {
@@ -31,7 +33,11 @@ def serve_dashboard(
 ) -> None:
     store = AnalyticsStore(memory_path)
     store.metadata()
-    handler = _handler(store)
+    handler = _handler(
+        store,
+        worker_store=WorkerManifestStore(),
+        config_write_enabled=host in {"127.0.0.1", "::1", "localhost"},
+    )
     server = ThreadingHTTPServer((host, port), handler)
     display_host = "127.0.0.1" if host == "0.0.0.0" else host
     url = f"http://{display_host}:{server.server_port}"
@@ -47,7 +53,15 @@ def serve_dashboard(
         server.server_close()
 
 
-def _handler(store: AnalyticsStore) -> type[BaseHTTPRequestHandler]:
+def _handler(
+    store: AnalyticsStore,
+    *,
+    worker_store: WorkerManifestStore | None = None,
+    config_write_enabled: bool = True,
+) -> type[BaseHTTPRequestHandler]:
+    workers = worker_store or WorkerManifestStore()
+    csrf_token = secrets.token_urlsafe(24)
+
     class DashboardHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
@@ -61,13 +75,56 @@ def _handler(store: AnalyticsStore) -> type[BaseHTTPRequestHandler]:
             except Exception as error:  # pragma: no cover - defensive server boundary
                 self._json({"error": f"dashboard error: {error}"}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
+        def do_PUT(self) -> None:  # noqa: N802
+            parsed = urlparse(self.path)
+            if parsed.path != "/api/workers":
+                self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+                return
+            if not config_write_enabled:
+                self._json({"error": "worker configuration writes require loopback binding"}, HTTPStatus.FORBIDDEN)
+                return
+            if self.headers.get("X-C4-CSRF") != csrf_token:
+                self._json({"error": "invalid CSRF token"}, HTTPStatus.FORBIDDEN)
+                return
+            try:
+                content_type = self.headers.get("Content-Type", "")
+                if not content_type.lower().startswith("application/json"):
+                    raise TypeError("worker manifest requires application/json")
+                length = int(self.headers.get("Content-Length", "0"))
+                if length < 1 or length > 256 * 1024:
+                    raise ValueError("worker manifest request must be between 1 byte and 256KB")
+                payload = json.loads(self.rfile.read(length))
+                expected = str(payload.get("revision", ""))
+                saved = workers.save(payload, expected_revision=expected)
+                self._json({**saved, "csrf_token": csrf_token, "write_enabled": True})
+            except json.JSONDecodeError as error:
+                self._json({"error": f"invalid JSON: {error}"}, HTTPStatus.BAD_REQUEST)
+            except TypeError as error:
+                self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+            except ValueError as error:
+                status = HTTPStatus.CONFLICT if "revision conflict" in str(error) else HTTPStatus.UNPROCESSABLE_ENTITY
+                self._json({"error": str(error)}, status)
+
         def log_message(self, format: str, *args: Any) -> None:
             return
 
         def _api(self, path: str, query: dict[str, list[str]]) -> None:
             value = lambda key, default="": query.get(key, [default])[0]
             if path == "/api/metadata":
-                payload = {**store.metadata(), "filters": store.filter_options()}
+                payload = {
+                    **store.metadata(),
+                    "filters": store.filter_options(),
+                    "csrf_token": csrf_token,
+                    "worker_config_write_enabled": config_write_enabled,
+                }
+            elif path == "/api/workers":
+                payload = {
+                    **workers.load_document(),
+                    "defaults": builtin_workers(),
+                    "csrf_token": csrf_token,
+                    "write_enabled": config_write_enabled,
+                    "path": str(workers.path),
+                }
             elif path == "/api/overview":
                 payload = store.overview(value("range", "30d"), value("timezone", "UTC"))
             elif path == "/api/timeseries":

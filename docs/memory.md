@@ -1,7 +1,31 @@
-# Multi-Harness Memory Graph: 简化整合版
+# Multi-Harness Shared Task Memory Graph
 
 **日期**: 2026-06-25  
-**目标**: 为 Codex + Claude CLI / OpenCode / Codex subagent 等多 harness 协作，设计一套尽量简单、可扩展、可落地的 shared memory 与文件协作结构。
+**目标**: 为 Codex + Claude CLI / OpenCode / Codex subagent 等多 harness 在**一次任务内部**协作，设计一套尽量简单、可扩展、可落地的 shared memory 与文件协作结构。
+
+## 范围边界
+
+本文只设计单次任务运行期间的 Shared Task Memory：worker 当前需要知道什么、能看到什么、产生了哪些 artifact，以及多个 worker 如何围绕文件协作。
+
+它不负责：
+
+- 保存跨任务的 Task Contract Graph 历史版本；
+- 统计历史任务的成功、失败、返工和升级；
+- 形成 worker 长期能力画像；
+- 为 Dashboard 保存长期 Token/延迟统计；
+- 把过去全部任务内容开放给当前 worker 检索。
+
+这些内容属于独立的 [Execution History](history.md)。两者可以暂时共用一个 SQLite 文件，但必须使用不同 repository、表语义和生命周期。
+
+```text
+Shared Task Memory                 Execution History
+当前任务的协作上下文               跨任务的已发生事实
+Context Pack / Artifact            Plan snapshot / Outcome
+Visibility / File coordination     Failure attribution / Token
+任务结束后可压缩或清理              Append-only、可审计、可聚合
+```
+
+另外，Decompose 产生的 `TaskContractGraph` 是规划结构；本文的图是执行期间的 `Context-Artifact Graph`。二者可以通过 node id 关联，但不是同一张图。
 
 ## 核心结论
 
@@ -84,7 +108,7 @@ worker 先读 summary，必要时再打开具体引用。
 - 任务拆解
 - 路由策略
 - verifier / hook 策略
-- token ledger
+- 当前任务的用量摘要
 - 不希望 worker 看到的控制信息
 
 重要原则：
@@ -110,7 +134,7 @@ worker 先读 summary，必要时再打开具体引用。
 - worker output
 - proposed facts
 - proposed patches
-- token usage
+- 本次节点的 token usage
 - verifier result
 
 这是系统里最重要的实体。
@@ -127,7 +151,7 @@ worker 先读 summary，必要时再打开具体引用。
 - 已验证事实
 - 相关模块说明
 - 项目约定
-- 历史失败/尝试记录
+- 当前任务中已经验证、并由主 harness 选择的前置结论
 - 指向具体 artifact/file 的引用
 
 原则：
@@ -171,7 +195,7 @@ worker 先读 summary，必要时再打开具体引用。
 | 主 harness | 全部 | 全部 |
 | worker | 自己的 task node、允许的 context pack、允许的 file/artifact | 只能写自己的 output/proposal |
 | verifier | worker 输出、证据文件、必要控制信息 | verifier result / accepted facts |
-| router | 任务元数据、ledger、历史结果 | worker node / routing decision |
+| router | 当前任务元数据，以及 History 提供的受控能力画像摘要 | worker node / routing decision |
 
 关键规则：
 
@@ -333,26 +357,28 @@ status
 expires_at
 ```
 
-## 推荐下一步
+## 与 Execution History 的连接
 
-先不要做完整自动路由。
-
-下一步应该先把当前 `cost_router run` 改成写入这个 memory graph：
-
-1. 每次委托创建一个 `worker_task` node。
-2. 每个 `--path` 创建一个 `artifact` node。
-3. worker task 和 artifact 之间创建 `may_read` edge。
-4. Claude / Qwen 输出写入 `worker_events`。
-5. verifier 接受后，把 facts 标记为 committed。
-6. token usage 继续写入 ledger。
-
-这样我们就完成了第一版：
+Shared Memory 只向 History 提交稳定引用和结构化终态：
 
 ```text
-Codex 可以委托 Claude/Qwen
-Claude/Qwen 只拿到指定上下文
-worker 输出被 verifier gate
-结果和 token 都进入共享 graph
+task/node id
+artifact reference and provenance
+verified outcome
+failure attribution
+token and latency
 ```
 
-这就是 multi-harness task router 的最小 memory 协议。
+历史原始内容不会自动成为新任务的 Context Pack。只有 Decompose/Application 明确选择某条已验证历史结论时，才将其摘要复制或引用为当前任务的 Context Pack；worker 不能自由遍历跨任务历史。
+
+## 当前实现与下一步
+
+当前 `cost_router run` 已经能把 worker、artifact、事件和 verifier 结果写入图结构。下一步不是继续把所有持久化都塞入这些表，而是收紧边界：
+
+1. `nodes/edges/worker_events/file_locks` 只表达当前任务协作图。
+2. Decompose 的 contract graph plan snapshot 迁到独立 History repository。
+3. `runs/subtasks` 中的历史调用逐步由 History facade 接管。
+4. Shared Memory 与 History 通过 task/node/artifact id 关联，不共享 worker 可见性。
+5. 保持旧 SQLite 读取兼容，完成迁移前不破坏 Dashboard。
+
+这就是 multi-harness task router 的最小 Shared Memory 协议；跨任务学习与统计不属于本文。

@@ -26,7 +26,8 @@ A cost-aware coding-agent router for delegating bounded work from a main Codex s
 > subagents, bounded patch proposals, shared-memory persistence, and the local
 > dashboard work today. Generic asynchronous workloads can also be monitored by
 > a resumable Claude session and returned to Codex on significant or terminal
-> events. Automatic decomposition, scheduling, and fallback remain roadmap items.
+> events. Explainable decomposition preview is now available; graph execution,
+> automatic scheduling, and fallback remain roadmap items.
 
 ## Project Status
 
@@ -38,7 +39,7 @@ A cost-aware coding-agent router for delegating bounded work from a main Codex s
 | Token ledger and dashboard | **Working** | Global SQLite ledger, usage charts, call details |
 | Shared memory graph | **Prototype** | Control, worker, context, artifact, event, and lock records |
 | Async worker runtime | **Prototype** | Detached workload, resumable Claude checks, terminal Codex callback |
-| Task decomposition | **In progress** | Main Codex + Skill currently perform decomposition |
+| Task decomposition | **Prototype** | Contract graph preview, capability assignment, confidence, risk, and history snapshot |
 | Automatic routing and fallback | **Planned** | Backend selection is still explicit |
 | OpenCode / other harnesses | **Planned** | Dashboard schema is ready; runtime adapter is not |
 
@@ -117,7 +118,7 @@ Core invariant: **Workers propose → Verifier commits → Codex integrates.**
 
 **Router and orchestration**
 
-- [ ] Turn Skill-level decomposition into a persisted parent-task DAG.
+- [x] Preview and persist an explainable task-contract graph without executing it.
 - [ ] Add dependency-aware parallel and sequential worker scheduling.
 - [ ] Route by task difficulty, risk, context size, model capability, and policy.
 - [ ] Add retry budgets, fallback chains, and callback delivery policies.
@@ -214,6 +215,32 @@ Claude on named repository files, the Skill passes `--external-policy allow
 --data-classification private`. This avoids treating an explicit request as
 missing consent. It does not override Codex sandbox, approval, organization, or
 data-egress policy, which may still deny execution.
+
+### Preview decomposition
+
+`decompose` builds a task situation, root contract, fast/graph decision,
+capability-aware worker assignments, verifier plans, and security-risk manifests.
+It is preview-only: no worker or task graph is executed.
+
+```bash
+cost-router decompose \
+  --goal "review and document the parser" \
+  --requirement "inspect parser behavior" \
+  --requirement "produce evidence-backed documentation" \
+  --constraint "do not edit source files" \
+  --acceptance "all required behavior is linked to file evidence" \
+  --active-skill review \
+  --skill-step inspect \
+  --skill-step document \
+  --plan-mode \
+  --json
+```
+
+Plans and node outcomes use the separate decomposition-history repository; they
+are not mixed into the per-task shared context/artifact memory graph. Worker
+capabilities are loaded from `~/.config/cost-router/workers.json` (or
+`COST_ROUTER_WORKERS`). The same manifest can be edited on the Dashboard's
+**Worker Configuration** page.
 
 ### Open the dashboard
 

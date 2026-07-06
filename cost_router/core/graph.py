@@ -367,6 +367,8 @@ class TaskSituation:
     environment_facts: tuple[str, ...] = ()
     unresolved_questions: tuple[str, ...] = ()
     available_worker_ids: tuple[str, ...] = ()
+    historical_profile_summary: tuple[str, ...] = ()
+    security_context: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -382,6 +384,8 @@ class TaskSituation:
             "environment_facts": list(self.environment_facts),
             "unresolved_questions": list(self.unresolved_questions),
             "available_worker_ids": list(self.available_worker_ids),
+            "historical_profile_summary": list(self.historical_profile_summary),
+            "security_context": list(self.security_context),
         }
 
 
@@ -391,6 +395,7 @@ class DecompositionPlan:
     shape: ExecutionShape
     graph: TaskContractGraph
     reasons: list[str] = field(default_factory=list)
+    assignment_records: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def validate(self) -> None:
         if not self.graph.nodes:
@@ -435,6 +440,7 @@ class DecompositionPlan:
         return {
             "shape": self.shape.value,
             "reasons": self.reasons,
+            "assignments": self.assignment_records,
             "situation": self.situation.to_dict(),
             "graph": self.graph.to_dict(),
         }

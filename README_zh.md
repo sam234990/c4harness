@@ -26,7 +26,8 @@
 > **C4Harness 仍处于实验阶段。** Claude CLI 委托、只读 Codex subagent、
 > 受限 patch 提案、共享 memory 持久化和本地控制台已经可用；通用异步
 > workload 也可以由可恢复的 Claude session 持续检查，并在重要事件或终态时
-> 返回 Codex。自动任务拆解、调度和 fallback 仍在 Roadmap 中。
+> 返回 Codex。可解释的任务拆解预览现已可用；任务图执行、自动调度和
+> fallback 仍在 Roadmap 中。
 
 ## 项目状态
 
@@ -38,7 +39,7 @@
 | Token 账本与 Dashboard | **可用** | 全局 SQLite、用量图表、调用详情 |
 | 共享 Memory 图 | **原型** | Control、worker、context、artifact、event 与 lock 记录 |
 | 异步 Worker Runtime | **原型** | 后台 workload、Claude 可恢复检查、终态 Codex 回调 |
-| 任务拆解 | **开发中** | 目前由 Codex 主会话和 Skill 执行 |
+| 任务拆解 | **原型** | 契约图预览、能力分配、置信度、风险清单与历史快照 |
 | 自动路由与 fallback | **计划中** | 当前仍需显式选择 backend |
 | OpenCode 与其他 harness | **计划中** | Dashboard schema 已预留，runtime adapter 尚未实现 |
 
@@ -115,7 +116,7 @@ cost-router async-task retry-callbacks async_123456789abc
 
 **Router 与编排**
 
-- [ ] 将 Skill 层任务拆解升级为持久化的 parent-task DAG。
+- [x] 预览并持久化可解释的任务契约图，但暂不执行任务图。
 - [ ] 实现依赖感知的并行与串行 worker 调度。
 - [ ] 根据难度、风险、上下文规模、模型能力和策略自动路由。
 - [ ] 加入重试预算、fallback 链与 callback 投递策略。
@@ -210,6 +211,30 @@ C4Harness 将用户授权与宿主强制策略分成两层：
 仓库文件时，Skill 会传入 `--external-policy allow --data-classification
 private`，不会把用户的明确要求误判为“尚未授权”。该标记不能覆盖 Codex
 沙箱、审批、组织或数据外发策略；宿主仍可能拒绝执行。
+
+### 预览任务拆解
+
+`decompose` 会构建任务情境、根契约、fast/graph 决策、基于能力的 Worker
+分配、VerifierPlan 与安全风险清单。它只做预览，不会调用 Worker 或执行任务图。
+
+```bash
+cost-router decompose \
+  --goal "审查并记录 parser 行为" \
+  --requirement "检查 parser 行为" \
+  --requirement "生成带证据的文档" \
+  --constraint "不得修改源码" \
+  --acceptance "所有必要行为均关联文件证据" \
+  --active-skill review \
+  --skill-step inspect \
+  --skill-step document \
+  --plan-mode \
+  --json
+```
+
+Plan 与节点结果写入独立的 decomposition history，不与单次任务使用的 shared
+context/artifact memory 图混合。Worker 能力来自
+`~/.config/cost-router/workers.json`（或 `COST_ROUTER_WORKERS`），同一份配置可在
+Dashboard 的 **Worker 配置** 页面编辑。
 
 ### 打开统计控制台
 

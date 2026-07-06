@@ -16,7 +16,7 @@ build/
 dist/
 
 # Project-specific exclusions
-tests/
+test/
 experiments/
 outputs/
 skills/*

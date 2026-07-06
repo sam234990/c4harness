@@ -32,6 +32,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "run":
         return run_command(args)
+    if args.command == "decompose":
+        return decompose_command(args)
     if args.command == "memory":
         return memory_command(args)
     if args.command == "dashboard":
@@ -105,6 +107,24 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--memory", default=str(default_memory_path()))
     run.add_argument("--execute", action="store_true", help="Actually invoke the worker backend")
     run.add_argument("--json", action="store_true", help="Print JSON output")
+
+    decompose = subparsers.add_parser("decompose", help="Preview a task contract graph")
+    decompose.add_argument("--goal", required=True)
+    decompose.add_argument("--repo", default=".")
+    decompose.add_argument("--path", action="append", default=[])
+    decompose.add_argument("--context-pack", action="append", default=[])
+    decompose.add_argument("--write-path", action="append", default=[])
+    decompose.add_argument("--requirement", action="append", default=[])
+    decompose.add_argument("--constraint", action="append", default=[])
+    decompose.add_argument("--acceptance", action="append", default=[])
+    decompose.add_argument("--active-skill", action="append", default=[])
+    decompose.add_argument("--skill-step", action="append", default=[])
+    decompose.add_argument("--environment-fact", action="append", default=[])
+    decompose.add_argument("--unresolved-question", action="append", default=[])
+    decompose.add_argument("--plan-mode", action="store_true")
+    decompose.add_argument("--workers", default=None)
+    decompose.add_argument("--memory", default=str(default_memory_path()))
+    decompose.add_argument("--json", action="store_true")
 
     memory = subparsers.add_parser("memory", help="Inspect local memory/ledger")
     memory.add_argument("--memory", default=str(default_memory_path()))
@@ -200,6 +220,81 @@ def build_parser() -> argparse.ArgumentParser:
     async_retry.add_argument("--json", action="store_true")
 
     return parser
+
+
+def decompose_command(args: argparse.Namespace) -> int:
+    from ..config.workers import WorkerManifestStore
+    from ..decompose import (
+        AcceptanceCriterion,
+        DecompositionPlanner,
+        InteractionMode,
+        Requirement,
+        RequirementKind,
+        TaskSituationBuilder,
+        WorkerRegistry,
+    )
+    from ..history import PlanSnapshot, SQLiteHistoryRepository, build_capability_profile
+
+    repo = Path(args.repo).resolve()
+    write_paths = [_resolve_from_repo(repo, item) for item in args.write_path]
+    task = Task(
+        goal=args.goal,
+        repo=repo,
+        paths=[_resolve_from_repo(repo, item) for item in args.path],
+        write_paths=write_paths,
+        context_packs=[_resolve_from_repo(repo, item) for item in args.context_pack],
+        constraints=TaskConstraints(mode=TaskMode.PATCH if write_paths else TaskMode.READ_ONLY),
+    )
+    deliverables = list(args.requirement) or [args.goal]
+    requirements = [
+        *[Requirement(f"R{index}", text, RequirementKind.DELIVERABLE) for index, text in enumerate(deliverables, 1)],
+        *[Requirement(f"C{index}", text, RequirementKind.CONSTRAINT) for index, text in enumerate(args.constraint, 1)],
+    ]
+    required_refs = tuple(item.id for item in requirements if item.required)
+    criteria = [
+        AcceptanceCriterion(f"A{index}", text, requirement_refs=required_refs)
+        for index, text in enumerate(args.acceptance, 1)
+    ] or None
+    manifest_store = WorkerManifestStore(Path(args.workers).expanduser() if args.workers else None)
+    workers, preferences = manifest_store.registry()
+    registry = WorkerRegistry(workers)
+    history = SQLiteHistoryRepository(Path(args.memory).expanduser())
+    profiles = {
+        worker_id: build_capability_profile(worker_id, history.outcomes_for_worker(worker_id))
+        for worker_id in workers
+    }
+    builder = TaskSituationBuilder()
+    situation = builder.from_task(
+        task,
+        requirements=requirements,
+        acceptance_criteria=criteria,
+        interaction_mode=InteractionMode.PLAN if args.plan_mode else InteractionMode.EXECUTE,
+        active_skills=args.active_skill,
+        skill_steps=args.skill_step,
+        environment_facts=args.environment_fact,
+        unresolved_questions=args.unresolved_question,
+        workers=workers.values(),
+        historical_profile_summary=[
+            f"{worker_id}:samples={sum(item.usable_sample_count for item in profile.evidence)}"
+            for worker_id, profile in profiles.items()
+        ],
+    )
+    planner = DecompositionPlanner(
+        worker_preferences=preferences,
+        capability_profiles=profiles,
+    )
+    plan = planner.plan(task, situation, registry)
+    history.append_plan(PlanSnapshot.from_plan(plan))
+    payload = plan.to_dict()
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(f"C4 Decomposition: {payload['shape']}")
+        for node in payload["graph"]["nodes"]:
+            print(f"- {node['kind']} {node['id']}: {node['objective']} -> {node['assigned_worker_id']}")
+        for reason in payload["reasons"]:
+            print(f"  reason: {reason}")
+    return 0
 
 
 def run_command(args: argparse.Namespace) -> int:

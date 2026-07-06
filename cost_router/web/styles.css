@@ -117,6 +117,24 @@ tbody tr:last-child td { border-bottom: 0; }
 .detail-section p { margin: 0; color: #3f4549; line-height: 1.65; }
 .detail-list { margin: 0; padding-left: 18px; color: #3f4549; line-height: 1.65; }
 .muted { color: var(--muted); }
+.worker-heading { align-items: center; }
+.worker-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.primary-button, .secondary-button, .danger-button { min-height: 34px; padding: 0 12px; border-radius: 6px; }
+.primary-button { color: #fff; background: #166b50; border: 1px solid #166b50; }
+.secondary-button { background: #fff; border: 1px solid var(--line); }
+.danger-button { color: #a53c36; background: #fff; border: 1px solid #e2c1be; }
+.config-notice, .workers-message { color: var(--muted); font-size: 12px; }
+.workers-message { min-height: 24px; margin-top: 12px; }
+.workers-list { display: grid; gap: 12px; margin-top: 18px; }
+.worker-card { padding: 16px; background: #fff; border: 1px solid var(--line); border-radius: 7px; }
+.worker-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.worker-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.worker-fields label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }
+.worker-fields input, .worker-fields textarea { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 5px; color: var(--ink); background: #fff; }
+.worker-fields textarea { min-height: 170px; font: 11px/1.5 ui-monospace, monospace; }
+.worker-fields .wide { grid-column: 1 / -1; }
+.worker-fields .worker-check { display: flex; align-items: center; gap: 7px; }
+.worker-check input { width: auto; }
 
 @media (max-width: 1050px) {
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -145,6 +163,8 @@ tbody tr:last-child td { border-bottom: 0; }
   .recent-row { grid-template-columns: minmax(0, 1fr) 100px; }
   .recent-row > :nth-child(2) { display: none; }
   .filters { grid-template-columns: 1fr 1fr; }
+  .worker-fields { grid-template-columns: 1fr; }
+  .worker-fields .wide { grid-column: auto; }
 }
 @media (max-width: 440px) {
   .summary-grid, .provider-grid { grid-template-columns: 1fr; }

@@ -267,7 +267,12 @@ class MemoryStore:
                     )
 
     def record_decomposition(self, task: Task, plan: DecompositionPlan) -> None:
-        """Persist a validated contract graph before worker execution begins."""
+        """Legacy bridge that persists a plan in the shared SQLite schema.
+
+        New application code should record immutable plan snapshots through the
+        history repository. This method remains for ledger compatibility until
+        existing dashboard and database readers have migrated.
+        """
         plan.validate()
         if plan.situation.task_id != task.id:
             raise ValueError("Decomposition plan and task ids must match.")

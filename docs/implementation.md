@@ -219,18 +219,18 @@ Verifier 是质量闸门。
 
 ### Shared Memory
 
-第一版用 SQLite。
+Shared Memory 只描述一次任务内的 worker/context/artifact 协作图，第一版用 SQLite。
 
 建议表：
 
-- `runs`：一次用户任务。
-- `subtasks`：子任务、backend、模型、状态。
-- `facts`：已验证事实。
-- `decisions`：已接受方案和原因。
-- `costs`：token、耗时、估算费用。
-- `artifacts`：summary、patch、日志路径。
+- `nodes`：worker task、context pack 和 artifact。
+- `edges`：可见性、上下文和 artifact 关系。
+- `worker_events`：当前任务中的 proposal、progress 和 final。
+- `file_locks`：read 与 patch proposal 协调。
 
-Memory 读取策略要保守：默认只取和当前 repo/path/task type 相关的少量 facts。
+Memory 读取策略要保守：worker 只读取当前任务明确授权的 Context Pack 和 artifact。
+
+跨任务的 `runs/subtasks`、plan snapshot、verified outcome、Token、失败归因和能力画像属于独立的 [Execution History](history.md)，不嵌入 Shared Memory 图。两者可以共用 SQLite 文件，但必须通过不同 repository 管理。
 
 ### Hooks
 

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable
 
 from ..core.contracts import Task, TaskMode
 from .capabilities import WorkerRegistry
+from .assignment import WorkerAssignmentPolicy
+from .atomicity import assess_shape
 from .models import (
-    AcceptanceCriterion,
     DecompositionPlan,
     ExecutionMode,
     ExecutionShape,
@@ -15,83 +16,23 @@ from .models import (
     InteractionMode,
     NodeKind,
     Requirement,
-    RequirementKind,
-    RequirementLedger,
-    RootContract,
     TaskContractGraph,
     TaskNodeContract,
     TaskSituation,
     VerificationContract,
-    WorkerArm,
 )
-
-
-@dataclass(slots=True)
-class TaskSituationBuilder:
-    """Builds an explicit situation from already-grounded inputs.
-
-    Requirement extraction from free-form chat and Skill workflow parsing belong
-    above this boundary. Keeping the builder deterministic makes the resulting
-    contract straightforward to test and audit.
-    """
-
-    def from_task(
-        self,
-        task: Task,
-        *,
-        requirements: Iterable[Requirement] | None = None,
-        acceptance_criteria: Iterable[AcceptanceCriterion] | None = None,
-        interaction_mode: InteractionMode = InteractionMode.EXECUTE,
-        active_skills: Iterable[str] = (),
-        skill_steps: Iterable[str] = (),
-        environment_facts: Iterable[str] = (),
-        unresolved_questions: Iterable[str] = (),
-        workers: Iterable[WorkerArm] = (),
-    ) -> TaskSituation:
-        ledger_items = list(requirements or ())
-        if not ledger_items:
-            ledger_items = [
-                Requirement("R1", task.goal, RequirementKind.DELIVERABLE)
-            ]
-        ledger = RequirementLedger(ledger_items)
-
-        criteria = list(acceptance_criteria or ())
-        if not criteria:
-            criteria = [
-                AcceptanceCriterion(
-                    id="A1",
-                    description="Produce an evidence-backed result for the requested goal.",
-                    requirement_refs=tuple(sorted(ledger.required_ids())),
-                )
-            ]
-
-        constraints = [f"task_mode={task.constraints.mode.value}"]
-        if not task.constraints.allow_network:
-            constraints.append("network=deny")
-        if task.write_paths:
-            constraints.append(
-                "write_paths=" + ",".join(str(path) for path in task.write_paths)
-            )
-
-        return TaskSituation(
-            task_id=task.id,
-            objective=task.goal,
-            repo=task.repo,
-            requirements=ledger,
-            root_contract=RootContract(criteria),
-            interaction_mode=interaction_mode,
-            active_skills=tuple(active_skills),
-            skill_steps=tuple(skill_steps),
-            constraints=tuple(constraints),
-            environment_facts=tuple(environment_facts),
-            unresolved_questions=tuple(unresolved_questions),
-            available_worker_ids=tuple(worker.id for worker in workers),
-        )
+from .situation import TaskSituationBuilder
+from .operators import choose_primary_split, requirements_for_objective
 
 
 @dataclass(slots=True)
 class DecompositionPlanner:
     max_work_nodes: int = 5
+    assignment_policy: WorkerAssignmentPolicy = field(
+        default_factory=WorkerAssignmentPolicy
+    )
+    worker_preferences: dict[str, float] = field(default_factory=dict)
+    capability_profiles: dict[str, object] = field(default_factory=dict)
 
     def plan(
         self,
@@ -100,8 +41,9 @@ class DecompositionPlanner:
         registry: WorkerRegistry | None = None,
     ) -> DecompositionPlan:
         deliverables = situation.requirements.deliverables()
-        graph_reasons = self._graph_reasons(situation, deliverables)
-        if not graph_reasons:
+        shape = assess_shape(situation)
+        graph_reasons = list(shape.reasons)
+        if shape.shape == ExecutionShape.FAST_PATH:
             plan = self._fast_path(task, situation)
         else:
             plan = self._graph_path(task, situation, deliverables, graph_reasons)
@@ -116,20 +58,30 @@ class DecompositionPlanner:
         registry: WorkerRegistry,
     ) -> None:
         for node in plan.graph.nodes.values():
-            eligible = registry.eligible(node.hard_capabilities)
-            if not eligible:
-                raise ValueError(
-                    f"No eligible worker for node {node.id}: {node.objective}"
-                )
-            node.assigned_worker_id = max(
-                eligible,
-                key=lambda worker: sum(
-                    weight * worker.capabilities.soft.get(dimension, 0.0)
-                    for dimension, weight in node.soft_capabilities.items()
-                ),
-            ).id
+            assignment = self.assignment_policy.assign(
+                node,
+                registry,
+                worker_preferences=self.worker_preferences,
+                capability_profiles=self.capability_profiles,  # type: ignore[arg-type]
+                verifier_available=node.verification.is_verifiable(),
+            )
+            node.assigned_worker_id = assignment.worker_id
+            record = assignment.to_dict()
+            worker = registry.get(assignment.worker_id)
+            record["risk_manifest"] = {
+                "destination": f"{worker.harness}:{worker.model}",
+                "privacy_zone": worker.capabilities.privacy_zone,
+                "transmitted_paths": [str(path) for path in (*node.allowed_paths, *node.context_packs)],
+                "write_paths": [str(path) for path in node.write_paths],
+                "execution_mode": node.execution_mode.value,
+                "persistent_session": node.hard_capabilities.persistent_session_required,
+                "callback": False,
+                "consent_required": worker.capabilities.privacy_zone == "approved_external",
+            }
+            plan.assignment_records[node.id] = record
             plan.reasons.append(
-                f"{node.id} assigned to {node.assigned_worker_id} after hard-capability filtering"
+                f"{node.id} assigned to {node.assigned_worker_id} after "
+                f"hard-capability filtering (confidence={assignment.confidence:.2f})"
             )
 
     def _graph_reasons(
@@ -180,21 +132,20 @@ class DecompositionPlanner:
             graph.add_node(probe)
             prerequisite_ids.append(probe.id)
 
-        if len(situation.skill_steps) > 1:
+        proposal = choose_primary_split(situation)
+        if proposal and proposal.operator == "workflow_split":
             work_specs = [
-                (
-                    step,
-                    situation.requirements.items
-                    if index == len(situation.skill_steps) - 1
-                    else [],
-                )
-                for index, step in enumerate(situation.skill_steps)
+                (objective, situation.requirements.items if index == len(proposal.objectives) - 1 else [])
+                for index, objective in enumerate(proposal.objectives)
+            ]
+        elif proposal:
+            work_specs = [
+                (objective, requirements_for_objective(situation, objective))
+                for objective in proposal.objectives
+                if objective != "Resolve task-blocking questions with repository evidence."
             ]
         else:
-            work_specs = [
-                (requirement.text, [requirement])
-                for requirement in (deliverables or situation.requirements.items)
-            ]
+            work_specs = [(task.goal, situation.requirements.items)]
         if len(work_specs) > self.max_work_nodes:
             raise ValueError(
                 f"Initial graph exceeds max_work_nodes={self.max_work_nodes}; "

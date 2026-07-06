@@ -1,6 +1,6 @@
 const I18N = {
   zh: {
-    overview: "总览", callLogs: "调用日志", localService: "本地服务", all: "全部",
+    overview: "总览", callLogs: "调用日志", workerConfig: "Worker 配置", localService: "本地服务", all: "全部",
     titleOverview: "分流总览", subOverview: "跨项目、跨会话的 worker 使用统计",
     titleCalls: "调用日志", subCalls: "每一次已执行的分流记录与验证结果",
     totalCalls: "总调用次数", delegatedContext: "委托上下文", savedMain: "预估主模型节省", actualWorker: "实际 Worker Token",
@@ -15,10 +15,12 @@ const I18N = {
     callDetail: "调用详情", parentTask: "主任务", workerTask: "Worker 子任务", thread: "Codex Thread", project: "项目", mode: "模式",
     routeReason: "路由原因", tokenDetails: "Token 明细", input: "输入", output: "输出", returned: "返回摘要", summary: "结果摘要",
     risks: "风险", nextSteps: "下一步", verification: "验证", artifacts: "产物", outputPath: "原始输出", patchPath: "Patch 提案",
-    notReported: "未报告", never: "暂无调用", updated: "最近调用 {time}", noData: "暂无数据", readOnly: "只读", patch: "Patch"
+    notReported: "未报告", never: "暂无调用", updated: "最近调用 {time}", noData: "暂无数据", readOnly: "只读", patch: "Patch",
+    titleWorkers: "Worker 配置", subWorkers: "全局能力、偏好和执行边界", addWorker: "新增 Worker", resetDefaults: "恢复默认", saveWorkers: "保存配置",
+    workerConfigNotice: "Manifest 不保存 API key、Token、Base URL 或其他凭证。", enabled: "启用", preference: "偏好", capabilitiesJson: "Capabilities JSON", remove: "删除", savedConfig: "配置已保存", writeDisabled: "非本机监听时禁止修改配置"
   },
   en: {
-    overview: "Overview", callLogs: "Call logs", localService: "Local service", all: "All",
+    overview: "Overview", callLogs: "Call logs", workerConfig: "Worker config", localService: "Local service", all: "All",
     titleOverview: "Routing overview", subOverview: "Worker usage across projects and Codex sessions",
     titleCalls: "Call logs", subCalls: "Executed routes, token usage, and verification results",
     totalCalls: "Total calls", delegatedContext: "Delegated context", savedMain: "Estimated main saved", actualWorker: "Actual worker tokens",
@@ -33,14 +35,17 @@ const I18N = {
     callDetail: "Call detail", parentTask: "Parent task", workerTask: "Worker task", thread: "Codex Thread", project: "Project", mode: "Mode",
     routeReason: "Route reason", tokenDetails: "Token details", input: "Input", output: "Output", returned: "Returned summary", summary: "Result summary",
     risks: "Risks", nextSteps: "Next steps", verification: "Verification", artifacts: "Artifacts", outputPath: "Raw output", patchPath: "Patch proposal",
-    notReported: "Not reported", never: "No calls yet", updated: "Latest call {time}", noData: "No data", readOnly: "Read only", patch: "Patch"
+    notReported: "Not reported", never: "No calls yet", updated: "Latest call {time}", noData: "No data", readOnly: "Read only", patch: "Patch",
+    titleWorkers: "Worker configuration", subWorkers: "Global capabilities, preferences, and execution boundaries", addWorker: "Add worker", resetDefaults: "Reset defaults", saveWorkers: "Save configuration",
+    workerConfigNotice: "The manifest never stores API keys, tokens, base URLs, or credentials.", enabled: "Enabled", preference: "Preference", capabilitiesJson: "Capabilities JSON", remove: "Remove", savedConfig: "Configuration saved", writeDisabled: "Configuration writes are disabled when not bound to loopback"
   }
 };
 
 const state = {
   lang: localStorage.getItem("cost-router-lang") || (navigator.language.startsWith("zh") ? "zh" : "en"),
   range: "30d", metric: "delegated_tokens", bucket: "day", page: 1, pages: 1,
-  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", metadata: null
+  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", metadata: null,
+  workers: null
 };
 const colors = { claude_cli: "#e56d3f", codex_subagent: "#15966b", opencode: "#3978cf" };
 const fallbackColors = ["#8b65c2", "#d09b32", "#2e99a4", "#c95073", "#68747e"];
@@ -72,8 +77,49 @@ function applyLanguage() {
 }
 
 function setPageCopy(page) {
-  $("#page-title").textContent = t(page === "overview" ? "titleOverview" : "titleCalls");
-  $("#page-subtitle").textContent = t(page === "overview" ? "subOverview" : "subCalls");
+  const title = page === "overview" ? "titleOverview" : page === "calls" ? "titleCalls" : "titleWorkers";
+  const subtitle = page === "overview" ? "subOverview" : page === "calls" ? "subCalls" : "subWorkers";
+  $("#page-title").textContent = t(title);
+  $("#page-subtitle").textContent = t(subtitle);
+}
+
+async function loadWorkers() {
+  state.workers = await api("/api/workers");
+  $("#workers-path").textContent = state.workers.path;
+  $("#save-workers").disabled = !state.workers.write_enabled;
+  $("#workers-message").textContent = state.workers.write_enabled ? "" : t("writeDisabled");
+  renderWorkers();
+}
+
+function renderWorkers() {
+  $("#workers-list").innerHTML = state.workers.workers.map((worker, index) => `<article class="worker-card" data-index="${index}">
+    <div class="worker-card-head"><strong>${esc(worker.id)}</strong><button class="danger-button remove-worker" type="button">${esc(t("remove"))}</button></div>
+    <div class="worker-fields">
+      <label>ID<input data-field="id" value="${esc(worker.id)}"></label>
+      <label>Backend<input data-field="backend" value="${esc(worker.backend)}"></label>
+      <label>Harness<input data-field="harness" value="${esc(worker.harness)}"></label>
+      <label>Model<input data-field="model" value="${esc(worker.model)}"></label>
+      <label>${esc(t("preference"))}<input data-field="preference_bias" type="number" min="-1" max="1" step="0.05" value="${esc(worker.preference_bias)}"></label>
+      <label class="worker-check"><input data-field="enabled" type="checkbox" ${worker.enabled ? "checked" : ""}>${esc(t("enabled"))}</label>
+      <label class="wide">${esc(t("capabilitiesJson"))}<textarea data-field="capabilities">${esc(JSON.stringify(worker.capabilities, null, 2))}</textarea></label>
+    </div></article>`).join("");
+  $$(".worker-card").forEach(card => {
+    const index = Number(card.dataset.index);
+    card.querySelectorAll("[data-field]").forEach(input => input.addEventListener("change", () => {
+      const field = input.dataset.field;
+      if (field === "enabled") state.workers.workers[index][field] = input.checked;
+      else if (field === "preference_bias") state.workers.workers[index][field] = Number(input.value);
+      else if (field === "capabilities") { try { state.workers.workers[index][field] = JSON.parse(input.value); } catch { $("#workers-message").textContent = "Invalid capabilities JSON"; } }
+      else state.workers.workers[index][field] = input.value;
+    }));
+    card.querySelector(".remove-worker").addEventListener("click", () => { state.workers.workers.splice(index, 1); renderWorkers(); });
+  });
+}
+
+async function saveWorkers() {
+  const response = await fetch("/api/workers", {method:"PUT", headers:{"Content-Type":"application/json", "X-C4-CSRF":state.workers.csrf_token}, body:JSON.stringify({version:state.workers.version, revision:state.workers.revision, workers:state.workers.workers})});
+  const payload = await response.json(); if (!response.ok) throw new Error(payload.error || response.statusText);
+  state.workers = {...state.workers, ...payload}; $("#workers-message").textContent = t("savedConfig"); renderWorkers();
 }
 
 async function loadMetadata() {
@@ -186,7 +232,7 @@ function closeDetail() { $("#detail-drawer").classList.remove("open"); $("#drawe
 function switchPage(page) {
   $$(".nav-item").forEach(item => item.classList.toggle("active", item.dataset.page === page));
   $$(".page").forEach(item => item.classList.toggle("active", item.id === `page-${page}`));
-  setPageCopy(page); $("#sidebar").classList.remove("open"); if (page === "calls") loadCalls();
+  setPageCopy(page); $("#sidebar").classList.remove("open"); if (page === "calls") loadCalls(); if (page === "workers") loadWorkers();
 }
 
 function bindSegmented(selector, key, callback) {
@@ -202,6 +248,9 @@ async function init() {
   await Promise.all([loadOverview(), loadChart(), loadRecent()]);
   $$(".nav-item").forEach(item => item.addEventListener("click", () => switchPage(item.dataset.page)));
   $("#view-all").addEventListener("click", () => switchPage("calls"));
+  $("#save-workers").addEventListener("click", () => saveWorkers().catch(error => $("#workers-message").textContent = error.message));
+  $("#reset-workers").addEventListener("click", () => { state.workers.workers = structuredClone(state.workers.defaults); renderWorkers(); });
+  $("#add-worker").addEventListener("click", () => { const item = structuredClone(state.workers.defaults[0]); item.id = `worker-${state.workers.workers.length + 1}`; state.workers.workers.push(item); renderWorkers(); });
   $("#lang-button").addEventListener("click", async () => { state.lang = state.lang === "zh" ? "en" : "zh"; localStorage.setItem("cost-router-lang", state.lang); applyLanguage(); await Promise.all([loadOverview(), loadChart(), loadRecent()]); if ($("#page-calls").classList.contains("active")) loadCalls(); });
   $("#menu-button").addEventListener("click", () => $("#sidebar").classList.toggle("open"));
   bindSegmented("#overview-range", "range", () => Promise.all([loadOverview(), loadChart()]));

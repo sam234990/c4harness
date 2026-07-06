@@ -13,6 +13,7 @@
       <nav>
         <button class="nav-item active" data-page="overview" data-i18n="overview">总览</button>
         <button class="nav-item" data-page="calls" data-i18n="callLogs">调用日志</button>
+        <button class="nav-item" data-page="workers" data-i18n="workerConfig">Worker 配置</button>
       </nav>
       <div class="sidebar-status">
         <div class="status-row"><span class="live-dot"></span><span data-i18n="localService">本地服务</span></div>
@@ -101,6 +102,16 @@
           <div class="empty-state" id="calls-empty" data-i18n="noCalls">没有匹配的调用记录</div>
         </div>
         <div class="pagination"><button id="prev-page" data-i18n="previous">上一页</button><span id="page-info"></span><button id="next-page" data-i18n="next">下一页</button></div>
+      </section>
+
+      <section class="page" id="page-workers">
+        <div class="section-heading worker-heading">
+          <div><h2 data-i18n="workerConfig">Worker 配置</h2><p id="workers-path"></p></div>
+          <div class="worker-actions"><button id="add-worker" class="secondary-button" data-i18n="addWorker">新增 Worker</button><button id="reset-workers" class="secondary-button" data-i18n="resetDefaults">恢复默认</button><button id="save-workers" class="primary-button" data-i18n="saveWorkers">保存配置</button></div>
+        </div>
+        <p class="config-notice" data-i18n="workerConfigNotice">Manifest 不保存 API key、Token、Base URL 或其他凭证。</p>
+        <div id="workers-list" class="workers-list"></div>
+        <div id="workers-message" class="workers-message"></div>
       </section>
     </main>
   </div>
