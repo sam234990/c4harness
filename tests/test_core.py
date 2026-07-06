@@ -32,6 +32,30 @@ from cost_router.verifier import verify_worker_result
 
 
 class CostRouterCoreTests(unittest.TestCase):
+    def test_configured_claude_worker_uses_model_alias(self):
+        from argparse import Namespace
+        import json
+        from cost_router.cli import resolve_worker_selection
+        from cost_router.config.workers import builtin_workers
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workers.json"
+            document = {"version": 1, "workers": builtin_workers()}
+            document["workers"][0]["model"] = "mimo-v2.5-pro"
+            document["workers"][0]["model_alias"] = "opus"
+            from cost_router.config.workers import WorkerManifestStore
+            store = WorkerManifestStore(path)
+            baseline = store.load_document()
+            store.save(document, expected_revision=baseline["revision"])
+            args = Namespace(
+                worker_id="claude-cli-sonnet", workers=str(path),
+                backend="codex-subagent", claude_model=None,
+            )
+            selected = resolve_worker_selection(args)
+            self.assertEqual(selected.model, "mimo-v2.5-pro")
+            self.assertEqual(args.backend, "claude-cli")
+            self.assertEqual(args.claude_model, "opus")
+
     def test_external_policy_requires_explicit_private_transfer_authorization(self):
         from cost_router.cli import build_parser, external_policy_error, external_transfer_error
 

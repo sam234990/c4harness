@@ -18,3 +18,6 @@ include = ["cost_router*"]
 [tool.setuptools.package-data]
 "cost_router.web" = ["*.html", "*.css", "*.js"]
 "cost_router.bundled_skill" = ["SKILL.md", "agents/*.yaml"]
+
+[tool.setuptools.data-files]
+"share/c4harness" = ["assets/c4.png"]

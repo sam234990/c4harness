@@ -17,7 +17,8 @@ const I18N = {
     risks: "风险", nextSteps: "下一步", verification: "验证", artifacts: "产物", outputPath: "原始输出", patchPath: "Patch 提案",
     notReported: "未报告", never: "暂无调用", updated: "最近调用 {time}", noData: "暂无数据", readOnly: "只读", patch: "Patch",
     titleWorkers: "Worker 配置", subWorkers: "全局能力、偏好和执行边界", addWorker: "新增 Worker", resetDefaults: "恢复默认", saveWorkers: "保存配置",
-    workerConfigNotice: "Manifest 不保存 API key、Token、Base URL 或其他凭证。", enabled: "启用", preference: "偏好", capabilitiesJson: "Capabilities JSON", remove: "删除", savedConfig: "配置已保存", writeDisabled: "非本机监听时禁止修改配置"
+    workerConfigNotice: "Manifest 不保存 API key、Token、Base URL 或其他凭证。Hard 决定能否执行，Soft 决定候选 Worker 的优先级。", enabled: "启用", preference: "整体偏好", remove: "删除", savedConfig: "配置已保存", writeDisabled: "非本机监听时禁止修改配置",
+    basicIdentity: "基本信息", hardCapabilities: "Hard Capabilities · 硬约束", softCapabilities: "Soft Capabilities · 能力偏好", hardHelp: "任一必需能力不满足时，该 Worker 会被直接排除。", softHelp: "0 表示不擅长，1 表示强项；后续会由验证历史修正。", harness: "Harness", modelName: "实际模型", modelAlias: "CLI 模型别名", modelAliasHelp: "传给 harness 的选择器，例如 opus；可由 Claude Code 映射到 mimo-v2.5-pro。", adapterDerived: "执行 Adapter（由 Harness 推导）", policyProfile: "策略配置", modalities: "输入模态", tools: "工具", writeIsolation: "写入隔离", network: "联网", structuredOutput: "结构化输出", contextTokens: "上下文 Token", persistentSession: "持续会话", providerProtocol: "Provider 协议", privacyZone: "隐私区域", implementation: "代码实现", debugging: "调试分析", documentation: "文档研究", architecture: "架构设计"
   },
   en: {
     overview: "Overview", callLogs: "Call logs", workerConfig: "Worker config", localService: "Local service", all: "All",
@@ -37,7 +38,8 @@ const I18N = {
     risks: "Risks", nextSteps: "Next steps", verification: "Verification", artifacts: "Artifacts", outputPath: "Raw output", patchPath: "Patch proposal",
     notReported: "Not reported", never: "No calls yet", updated: "Latest call {time}", noData: "No data", readOnly: "Read only", patch: "Patch",
     titleWorkers: "Worker configuration", subWorkers: "Global capabilities, preferences, and execution boundaries", addWorker: "Add worker", resetDefaults: "Reset defaults", saveWorkers: "Save configuration",
-    workerConfigNotice: "The manifest never stores API keys, tokens, base URLs, or credentials.", enabled: "Enabled", preference: "Preference", capabilitiesJson: "Capabilities JSON", remove: "Remove", savedConfig: "Configuration saved", writeDisabled: "Configuration writes are disabled when not bound to loopback"
+    workerConfigNotice: "The manifest never stores API keys, tokens, base URLs, or credentials. Hard capabilities determine eligibility; soft capabilities rank eligible workers.", enabled: "Enabled", preference: "Overall preference", remove: "Remove", savedConfig: "Configuration saved", writeDisabled: "Configuration writes are disabled when not bound to loopback",
+    basicIdentity: "Basic identity", hardCapabilities: "Hard capabilities", softCapabilities: "Soft capabilities", hardHelp: "A worker is excluded when any required hard capability is missing.", softHelp: "0 means weak and 1 means strong; verified history can refine these priors.", harness: "Harness", modelName: "Actual model", modelAlias: "CLI model alias", modelAliasHelp: "Selector passed to the harness, for example opus; Claude Code may map it to mimo-v2.5-pro.", adapterDerived: "Execution adapter (derived from Harness)", policyProfile: "Policy profile", modalities: "Modalities", tools: "Tools", writeIsolation: "Write isolation", network: "Network", structuredOutput: "Structured output", contextTokens: "Context tokens", persistentSession: "Persistent session", providerProtocol: "Provider protocol", privacyZone: "Privacy zone", implementation: "Implementation", debugging: "Debugging", documentation: "Documentation", architecture: "Architecture"
   }
 };
 
@@ -58,6 +60,12 @@ const backendColor = (value) => colors[value] || fallbackColors[Math.abs([...val
 const formatNumber = (value) => new Intl.NumberFormat(state.lang === "zh" ? "zh-CN" : "en-US", {notation: Number(value) >= 100000 ? "compact" : "standard", maximumFractionDigits: 1}).format(Number(value || 0));
 const formatFull = (value) => new Intl.NumberFormat(state.lang === "zh" ? "zh-CN" : "en-US").format(Number(value || 0));
 const formatDate = (value) => value ? new Intl.DateTimeFormat(state.lang === "zh" ? "zh-CN" : "en-US", {month:"short", day:"numeric", hour:"2-digit", minute:"2-digit"}).format(new Date(value)) : "-";
+const BACKEND_BY_HARNESS = {claude_code:"claude_cli", codex:"codex_subagent", opencode:"external_cli", aider:"external_cli"};
+const MODALITIES = ["text", "image", "audio"];
+const TOOLS = ["read", "grep", "glob", "patch", "execute", "web"];
+const SOFT_DIMENSIONS = ["implementation", "debugging", "documentation", "architecture"];
+const option = (value, current, label=value) => `<option value="${esc(value)}" ${value === current ? "selected" : ""}>${esc(label)}</option>`;
+const check = value => value ? "checked" : "";
 
 async function api(path, params = {}) {
   const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== "" && value != null));
@@ -93,25 +101,42 @@ async function loadWorkers() {
 
 function renderWorkers() {
   $("#workers-list").innerHTML = state.workers.workers.map((worker, index) => `<article class="worker-card" data-index="${index}">
-    <div class="worker-card-head"><strong>${esc(worker.id)}</strong><button class="danger-button remove-worker" type="button">${esc(t("remove"))}</button></div>
-    <div class="worker-fields">
-      <label>ID<input data-field="id" value="${esc(worker.id)}"></label>
-      <label>Backend<input data-field="backend" value="${esc(worker.backend)}"></label>
-      <label>Harness<input data-field="harness" value="${esc(worker.harness)}"></label>
-      <label>Model<input data-field="model" value="${esc(worker.model)}"></label>
-      <label>${esc(t("preference"))}<input data-field="preference_bias" type="number" min="-1" max="1" step="0.05" value="${esc(worker.preference_bias)}"></label>
-      <label class="worker-check"><input data-field="enabled" type="checkbox" ${worker.enabled ? "checked" : ""}>${esc(t("enabled"))}</label>
-      <label class="wide">${esc(t("capabilitiesJson"))}<textarea data-field="capabilities">${esc(JSON.stringify(worker.capabilities, null, 2))}</textarea></label>
-    </div></article>`).join("");
+    <div class="worker-card-head"><div><strong>${esc(worker.id)}</strong><span class="model-badge">${esc(worker.model_alias || worker.model)}</span></div><div class="worker-head-actions"><label class="switch-row"><input data-worker-field="enabled" type="checkbox" ${check(worker.enabled)}><span class="switch"></span>${esc(t("enabled"))}</label><button class="danger-button remove-worker" type="button">${esc(t("remove"))}</button></div></div>
+    <section class="capability-section identity-section"><div class="capability-title"><div><h3>${esc(t("basicIdentity"))}</h3></div></div><div class="worker-fields">
+      <label>ID<input data-worker-field="id" value="${esc(worker.id)}"></label>
+      <label>${esc(t("harness"))}<select data-worker-field="harness">${[...new Set(["claude_code","codex","opencode","aider",worker.harness])].map(value => option(value, worker.harness)).join("")}</select></label>
+      <label>${esc(t("modelName"))}<input data-worker-field="model" value="${esc(worker.model)}" placeholder="mimo-v2.5-pro"></label>
+      <label>${esc(t("modelAlias"))}<input data-worker-field="model_alias" value="${esc(worker.model_alias || worker.model)}" placeholder="opus"><small>${esc(t("modelAliasHelp"))}</small></label>
+      <label>${esc(t("policyProfile"))}<input data-worker-field="policy_profile" value="${esc(worker.policy_profile)}"></label>
+      <label class="wide slider-field"><span>${esc(t("preference"))}</span><div class="slider-line"><span>-1</span><input data-worker-field="preference_bias" type="range" min="-1" max="1" step="0.05" value="${esc(worker.preference_bias)}"><output>${Number(worker.preference_bias).toFixed(2)}</output><span>+1</span></div></label>
+    </div></section>
+    <section class="capability-section hard-section"><div class="capability-title"><div><h3>${esc(t("hardCapabilities"))}</h3><p>${esc(t("hardHelp"))}</p></div><span class="capability-pill hard-pill">HARD</span></div>
+      <div class="choice-group"><span class="field-title">${esc(t("modalities"))}</span><div class="choice-row">${[...new Set([...MODALITIES, ...worker.capabilities.modalities])].map(value => `<label class="choice-chip"><input data-cap-set="modalities" value="${value}" type="checkbox" ${check(worker.capabilities.modalities.includes(value))}><span>${esc(value)}</span></label>`).join("")}</div></div>
+      <div class="choice-group"><span class="field-title">${esc(t("tools"))}</span><div class="choice-row">${[...new Set([...TOOLS, ...worker.capabilities.tools])].map(value => `<label class="choice-chip"><input data-cap-set="tools" value="${value}" type="checkbox" ${check(worker.capabilities.tools.includes(value))}><span>${esc(value)}</span></label>`).join("")}</div></div>
+      <div class="hard-grid">
+        <label>${esc(t("writeIsolation"))}<select data-cap-field="write_isolation">${[...new Set(["none","staged_copy","worktree",worker.capabilities.write_isolation])].map(value => option(value, worker.capabilities.write_isolation)).join("")}</select></label>
+        <label>${esc(t("providerProtocol"))}<select data-cap-field="provider_protocol">${[...new Set(["harness_native","responses","chat_completions","mcp",worker.capabilities.provider_protocol])].map(value => option(value, worker.capabilities.provider_protocol)).join("")}</select></label>
+        <label>${esc(t("privacyZone"))}<select data-cap-field="privacy_zone">${[...new Set(["local","approved_external","configured_provider",worker.capabilities.privacy_zone])].map(value => option(value, worker.capabilities.privacy_zone)).join("")}</select></label>
+        <label>${esc(t("contextTokens"))}<input data-cap-field="context_tokens" type="number" min="0" step="1000" value="${esc(worker.capabilities.context_tokens)}"></label>
+      </div>
+      <div class="switch-grid"><label class="switch-row"><input data-cap-field="network" type="checkbox" ${check(worker.capabilities.network)}><span class="switch"></span>${esc(t("network"))}</label><label class="switch-row"><input data-cap-field="structured_output" type="checkbox" ${check(worker.capabilities.structured_output)}><span class="switch"></span>${esc(t("structuredOutput"))}</label><label class="switch-row"><input data-cap-field="persistent_session" type="checkbox" ${check(worker.capabilities.persistent_session)}><span class="switch"></span>${esc(t("persistentSession"))}</label></div>
+    </section>
+    <section class="capability-section soft-section"><div class="capability-title"><div><h3>${esc(t("softCapabilities"))}</h3><p>${esc(t("softHelp"))}</p></div><span class="capability-pill soft-pill">SOFT</span></div><div class="soft-grid">
+      ${SOFT_DIMENSIONS.map(dimension => `<label class="slider-field"><span>${esc(t(dimension))}</span><div class="slider-line"><span>0</span><input data-soft-field="${dimension}" type="range" min="0" max="1" step="0.05" value="${esc(worker.capabilities.soft[dimension] ?? 0)}"><output>${Number(worker.capabilities.soft[dimension] ?? 0).toFixed(2)}</output><span>1</span></div></label>`).join("")}
+    </div></section>
+  </article>`).join("");
   $$(".worker-card").forEach(card => {
     const index = Number(card.dataset.index);
-    card.querySelectorAll("[data-field]").forEach(input => input.addEventListener("change", () => {
-      const field = input.dataset.field;
-      if (field === "enabled") state.workers.workers[index][field] = input.checked;
-      else if (field === "preference_bias") state.workers.workers[index][field] = Number(input.value);
-      else if (field === "capabilities") { try { state.workers.workers[index][field] = JSON.parse(input.value); } catch { $("#workers-message").textContent = "Invalid capabilities JSON"; } }
-      else state.workers.workers[index][field] = input.value;
+    const worker = state.workers.workers[index];
+    card.querySelectorAll("[data-worker-field]").forEach(input => input.addEventListener("input", () => {
+      const field = input.dataset.workerField;
+      worker[field] = input.type === "checkbox" ? input.checked : input.type === "range" ? Number(input.value) : input.value;
+      if (field === "harness") worker.backend = BACKEND_BY_HARNESS[input.value] || worker.backend;
+      if (input.type === "range") input.parentElement.querySelector("output").textContent = Number(input.value).toFixed(2);
     }));
+    card.querySelectorAll("[data-cap-field]").forEach(input => input.addEventListener("change", () => { worker.capabilities[input.dataset.capField] = input.type === "checkbox" ? input.checked : input.type === "number" ? Number(input.value) : input.value; }));
+    card.querySelectorAll("[data-cap-set]").forEach(input => input.addEventListener("change", () => { const field=input.dataset.capSet; worker.capabilities[field] = [...card.querySelectorAll(`[data-cap-set="${field}"]:checked`)].map(item => item.value); }));
+    card.querySelectorAll("[data-soft-field]").forEach(input => input.addEventListener("input", () => { worker.capabilities.soft[input.dataset.softField] = Number(input.value); input.parentElement.querySelector("output").textContent = Number(input.value).toFixed(2); }));
     card.querySelector(".remove-worker").addEventListener("click", () => { state.workers.workers.splice(index, 1); renderWorkers(); });
   });
 }
@@ -175,7 +200,7 @@ function drawChart(data) {
     if (lastIndex - labelIndexes.at(-1) < Math.max(2, labelEvery / 2)) labelIndexes.pop();
     labelIndexes.push(lastIndex);
   }
-  let parts = [`<title>Cost Router usage chart</title>`];
+  let parts = [`<title>C4Harness usage chart</title>`];
   for (let i = 0; i <= 4; i++) {
     const y = top + plotH * i / 4, value = roundedMax * (4 - i) / 4;
     parts.push(`<line x1="${left}" y1="${y}" x2="${width-right}" y2="${y}" stroke="#e8ebe9" stroke-dasharray="3 4"/><text x="${left-9}" y="${y+4}" text-anchor="end" fill="#8a9297" font-size="10">${esc(formatNumber(value))}</text>`);

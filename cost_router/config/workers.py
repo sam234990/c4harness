@@ -16,6 +16,12 @@ from ..core.graph import WorkerArm, WorkerCapabilities
 SCHEMA_VERSION = 1
 _ALLOWED_TOP = {"version", "revision", "workers"}
 _SECRET_NAMES = {"api_key", "token", "secret", "password", "base_url"}
+_BACKEND_BY_HARNESS = {
+    "claude_code": "claude_cli",
+    "codex": "codex_subagent",
+    "opencode": "external_cli",
+    "aider": "external_cli",
+}
 
 
 def default_workers_path() -> Path:
@@ -30,7 +36,8 @@ def builtin_workers() -> list[dict[str, Any]]:
     return [
         {
             "id": "claude-cli-sonnet", "backend": "claude_cli",
-            "harness": "claude_code", "model": "sonnet", "enabled": True,
+            "harness": "claude_code", "model": "sonnet", "model_alias": "sonnet",
+            "enabled": True,
             "policy_profile": "external-staged", "preference_bias": 0.0,
             "capabilities": {
                 "modalities": ["text"], "tools": ["read", "grep", "glob", "patch"],
@@ -43,7 +50,8 @@ def builtin_workers() -> list[dict[str, Any]]:
         },
         {
             "id": "codex-subagent-default", "backend": "codex_subagent",
-            "harness": "codex", "model": "configured", "enabled": True,
+            "harness": "codex", "model": "configured", "model_alias": "configured",
+            "enabled": True,
             "policy_profile": "read-only", "preference_bias": 0.0,
             "capabilities": {
                 "modalities": ["text"], "tools": ["read", "grep", "glob"],
@@ -112,13 +120,16 @@ def validate_document(document: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(workers, list):
         raise ValueError("workers must be a list")
     ids: set[str] = set()
+    normalized: list[dict[str, Any]] = []
     for item in workers:
-        manifest = manifest_from_dict(item)
+        clean_item = _normalize_worker(item)
+        manifest = manifest_from_dict(clean_item)
         if manifest.arm.id in ids:
             raise ValueError(f"duplicate worker id: {manifest.arm.id}")
         ids.add(manifest.arm.id)
-    clean = {"version": SCHEMA_VERSION, "workers": workers}
-    clean["revision"] = _revision(workers)
+        normalized.append(clean_item)
+    clean = {"version": SCHEMA_VERSION, "workers": normalized}
+    clean["revision"] = _revision(normalized)
     return clean
 
 
@@ -127,7 +138,7 @@ def manifest_from_dict(item: dict[str, Any]) -> WorkerManifest:
         raise ValueError("worker must be an object")
     if any(name.lower() in _SECRET_NAMES for name in _walk_keys(item)):
         raise ValueError("worker manifest must not contain credentials or base URLs")
-    required = {"id", "backend", "harness", "model", "enabled", "policy_profile", "preference_bias", "capabilities"}
+    required = {"id", "backend", "harness", "model", "model_alias", "enabled", "policy_profile", "preference_bias", "capabilities"}
     if set(item) != required:
         raise ValueError("worker fields do not match schema")
     preference = _unit(item["preference_bias"], "preference_bias", minimum=-1.0)
@@ -149,6 +160,7 @@ def manifest_from_dict(item: dict[str, Any]) -> WorkerManifest:
     arm = WorkerArm(
         id=_text(item["id"], "id"), backend=_text(item["backend"], "backend"),
         harness=_text(item["harness"], "harness"), model=_text(item["model"], "model"),
+        model_alias=_text(item["model_alias"], "model_alias"),
         policy_profile=_text(item["policy_profile"], "policy_profile"), enabled=item["enabled"],
         capabilities=WorkerCapabilities(
             modalities=frozenset(map(str, caps["modalities"])), tools=frozenset(map(str, caps["tools"])),
@@ -161,6 +173,17 @@ def manifest_from_dict(item: dict[str, Any]) -> WorkerManifest:
     if arm.capabilities.context_tokens < 0:
         raise ValueError("context_tokens must be non-negative")
     return WorkerManifest(arm, preference)
+
+
+def _normalize_worker(item: Any) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        raise ValueError("worker must be an object")
+    normalized = dict(item)
+    normalized.setdefault("model_alias", normalized.get("model"))
+    harness = normalized.get("harness")
+    if harness in _BACKEND_BY_HARNESS:
+        normalized["backend"] = _BACKEND_BY_HARNESS[harness]
+    return normalized
 
 
 def _walk_keys(value: Any):

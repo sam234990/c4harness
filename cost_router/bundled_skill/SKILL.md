@@ -82,6 +82,10 @@ cost-router run \
 ```
 
 7. For a configured Responses-compatible Codex worker, omit `--backend claude-cli` and provide the appropriate `--env-file` when it is not `.env`.
+   When the user selected a global Worker entry, prefer `--worker-id <id>` over
+   repeating backend/model flags. For Claude Code, C4Harness passes that entry's
+   `model_alias` to `claude --model`; the user's Claude environment may map an
+   alias such as `opus` to a custom upstream model such as `mimo-v2.5-pro`.
 8. Inspect `verification`, evidence, risks, and the raw output path. Treat worker conclusions as proposals. Check important claims against repository files or tests before relying on them.
 9. If a worker lacks context, rerun a narrower subtask with an additional context pack. If it fails verification twice, stop delegating that subtask and handle it in the main session.
 10. Inspect an accepted `proposed_patch_path` before applying it. Apply or reproduce the change in the main workspace, then run the relevant tests in the main session.
@@ -133,12 +137,13 @@ cost-router async-task start \
 ```
 
 4. Apply the same external delegation policy before sending log snapshots. Use `allow/private` only for the user-confirmed snapshot and callback scope; otherwise ask first or use `--backend none`.
-5. Let `--callback auto` capture `CODEX_THREAD_ID`. Do not pass `--callback none` when the user expects completion or failure to return to this Codex thread.
+5. Keep the default `--callback auto`, which writes terminal/significant events to the durable local Inbox. Do not claim that this wakes the visible Codex UI. Inspect with `cost-router async-task inbox --unread-only` and acknowledge handled items with `cost-router async-task ack <inbox-id>`.
 6. Return the task ID and task directory to the user after the detached runtime process starts. Do not block the Codex turn by polling healthy progress.
-7. On a callback, inspect `cost-router async-task status <task-id>` and `events <task-id>`, then decide whether to report completion, diagnose, patch, or explicitly start a replacement workload.
-8. Use `stop <task-id>` for cancellation and `retry-callbacks <task-id>` when a queued Codex resume failed.
+7. When the host or user surfaces an Inbox event, inspect `cost-router async-task status <task-id>` and `events <task-id>`, then decide whether to report completion, diagnose, patch, or explicitly start a replacement workload.
+8. Use `--callback codex-resume` only when the user explicitly opts into the legacy headless callback. It runs read-only and a zero exit code means only `callback_executed`, not that the current UI received the message. Use `retry-callbacks <task-id>` only for this explicit compatibility mode.
+9. Use `stop <task-id>` for cancellation.
 
-The Python runtime process owns scheduling, process exit, timeout, marker files, and cancellation without using model tokens. Claude uses one resumable session for bounded snapshots. Healthy observations stay in memory; completion, failure, timeout, cancellation, stalled work, and requests for input may resume Codex.
+The Python runtime process owns scheduling, process exit, timeout, marker files, and cancellation without using model tokens. It checks file metadata before invoking Claude, skips unchanged snapshots, and backs off repeated idle checks. Claude uses one resumable session only for changed snapshots and terminal summaries. Completion, failure, timeout, cancellation, stalled work, and requests for input enter the durable Inbox by default.
 
 ## Decomposition Rules
 
@@ -154,6 +159,7 @@ The Python runtime process owns scheduling, process exit, timeout, marker files,
 - `cost-router decompose` previews and records a contract graph; it does not execute or schedule graph nodes.
 - The router CLI executes one worker task per invocation. The main Codex session currently performs graph scheduling.
 - The async runtime owns one workload per task and uses Claude only for bounded observations and terminal summaries.
+- Inbox delivery is durable, but automatic wake-up of a currently visible IDE/App conversation requires a host adapter that provides an explicit acknowledgement. Standalone `codex exec resume` is not such an acknowledgement.
 - Claude CLI supports bounded patch proposals in a staged workspace. Codex subagent delegation remains read-only.
 - Patch workers edit copies, never the target repository. The main agent reviews and applies accepted patches.
 - Multiple delegated calls are not yet executed from the persisted task-contract graph.

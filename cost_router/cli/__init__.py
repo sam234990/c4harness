@@ -14,6 +14,7 @@ from .main import (
     prepare_claude_backend,
     prepare_codex_backend,
     print_human,
+    resolve_worker_selection,
     run_command,
     setup_command,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "prepare_claude_backend",
     "prepare_codex_backend",
     "print_human",
+    "resolve_worker_selection",
     "run_command",
     "setup_command",
 ]

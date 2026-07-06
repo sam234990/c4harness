@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib.resources
 import json
 import secrets
+import sysconfig
 from pathlib import Path
 import threading
 from typing import Any
@@ -21,6 +22,7 @@ STATIC_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".css": "text/css; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
+    ".png": "image/png",
 }
 
 
@@ -41,7 +43,7 @@ def serve_dashboard(
     server = ThreadingHTTPServer((host, port), handler)
     display_host = "127.0.0.1" if host == "0.0.0.0" else host
     url = f"http://{display_host}:{server.server_port}"
-    print(f"Cost Router Dashboard: {url}")
+    print(f"C4Harness Dashboard: {url}")
     print(f"Ledger: {memory_path.resolve()}")
     if open_browser:
         threading.Timer(0.35, lambda: webbrowser.open(url)).start()
@@ -158,11 +160,22 @@ def _handler(
 
         def _static(self, path: str) -> None:
             name = "index.html" if path in {"", "/"} else path.lstrip("/")
-            if name not in {"index.html", "app.js", "styles.css"}:
+            if name not in {"index.html", "app.js", "styles.css", "c4.png"}:
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
-            resource = importlib.resources.files("cost_router.web").joinpath(name)
-            data = resource.read_bytes()
+            if name == "c4.png":
+                candidates = (
+                    Path(__file__).resolve().parents[2] / "assets" / "c4.png",
+                    Path(sysconfig.get_path("data")) / "share" / "c4harness" / "c4.png",
+                )
+                icon = next((candidate for candidate in candidates if candidate.exists()), None)
+                if icon is None:
+                    self.send_error(HTTPStatus.NOT_FOUND)
+                    return
+                data = icon.read_bytes()
+            else:
+                resource = importlib.resources.files("cost_router.web").joinpath(name)
+                data = resource.read_bytes()
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", STATIC_TYPES[Path(name).suffix])
             self.send_header("Content-Length", str(len(data)))

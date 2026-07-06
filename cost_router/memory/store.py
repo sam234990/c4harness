@@ -156,8 +156,24 @@ CREATE TABLE IF NOT EXISTS async_task_events (
   callback_attempts INTEGER NOT NULL DEFAULT 0,
   callback_error TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  executed_at TEXT,
+  acknowledged_at TEXT,
   delivered_at TEXT,
   UNIQUE(task_id, event_key),
+  FOREIGN KEY(task_id) REFERENCES async_tasks(id)
+);
+
+CREATE TABLE IF NOT EXISTS async_task_inbox (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id INTEGER NOT NULL UNIQUE,
+  task_id TEXT NOT NULL,
+  source_thread_id TEXT,
+  event_type TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'unread',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  acknowledged_at TEXT,
+  FOREIGN KEY(event_id) REFERENCES async_task_events(id),
   FOREIGN KEY(task_id) REFERENCES async_tasks(id)
 );
 """
@@ -874,6 +890,14 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
             "data_classification": "TEXT NOT NULL DEFAULT 'private'",
         },
     )
+    _add_missing_columns(
+        conn,
+        "async_task_events",
+        {
+            "executed_at": "TEXT",
+            "acknowledged_at": "TEXT",
+        },
+    )
     _backfill_subtasks(conn)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_subtasks_created_at ON subtasks(created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_subtasks_backend ON subtasks(backend)")
@@ -886,6 +910,14 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_async_task_events_callback "
         "ON async_task_events(callback_status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_async_task_inbox_status "
+        "ON async_task_inbox(status, created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_async_task_inbox_thread "
+        "ON async_task_inbox(source_thread_id, status)"
     )
 
 

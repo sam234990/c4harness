@@ -55,39 +55,6 @@ breakdown, raw output, and proposed patch.
 
 ![C4Harness call logs and detail drawer](assets/dashboard-call-logs.png)
 
-## Asynchronous Tasks
-
-`async-task` is a generic runtime primitive, not a training-specific command. It
-can own any long-running workload, periodically send bounded log snapshots to the
-same Claude session, persist events in SQLite, and resume the originating Codex
-thread only when attention is needed or the workload reaches a terminal state.
-
-```bash
-cost-router async-task start \
-  --external-policy allow \
-  --data-classification private \
-  --goal "Monitor this long job and return actionable failures or completion" \
-  --command "bash scripts/run_job.sh --config configs/job.yaml" \
-  --log-path outputs/progress.log \
-  --interval 60
-```
-
-When started from Codex, `CODEX_THREAD_ID` is captured automatically and the
-default callback is `codex exec resume`. Normal completion, failure,
-cancellation, and timeout all produce terminal events. Periodic healthy checks
-do not wake Codex.
-
-```bash
-cost-router async-task status async_123456789abc
-cost-router async-task events async_123456789abc
-cost-router async-task stop async_123456789abc
-cost-router async-task retry-callbacks async_123456789abc
-```
-
-The deterministic Python runtime process handles scheduling and decides process
-exit, marker files, timeout, and cancellation. It does not use model tokens.
-Claude analyzes snapshots but cannot override those facts.
-
 ## Target Architecture
 
 ![Cost-Aware Coding Router — end-to-end flow and multi-layer shared memory graph](assets/router.png)
@@ -103,6 +70,19 @@ The system follows a three-stage pipeline — **Task Router → Delegator → Ve
 | OpenCode Worker | search / summarize / alternate harness | Planned |
 | Other (Aider, Roo, Custom) | adapter-based extension | Research |
 
+**Task decomposition (C4-ACD):**
+
+The decomposition module (Adaptive Contract Decomposition) transforms a grounded user task into an executable, verifiable, and replannable plan. Rather than splitting a prompt into fragments, it:
+
+1. **Grounds the task** — collects minimal sufficient context: user goals, skill workflow, repository facts, and worker capabilities.
+2. **Defines completion** — constructs a Root Contract specifying what evidence or artifacts must exist for the task to be considered done.
+3. **Decides fast vs. graph path** — evaluates whether decomposition actually reduces risk, context pressure, or capability gaps, or whether a single worker suffices.
+4. **Generates a contract graph** — produces task nodes with objectives, dependencies, context packs, permissions, and per-node verifier plans.
+5. **Assigns workers** — filters by hard capabilities (modalities, tools, write isolation, permissions) then scores soft capabilities, historical evidence, and user preferences.
+6. **Replans from feedback** — adjusts the plan based on structured failure signals (missing context, capability mismatch, verification failure) while respecting attempt and token budgets.
+
+Each node is a contract: it declares goals, inputs, artifacts, capabilities, permissions, and how success will be verified. Decomposition does not execute workers or write shared memory — it produces a plan consumed by the Delegator and Verifier.
+
 **Multi-layer shared memory graph** (4 layers):
 
 - **Main layer** — Main Private State: routing policy, private plan, final decisions.
@@ -113,35 +93,6 @@ The system follows a three-stage pipeline — **Task Router → Delegator → Ve
 Dependency types: **solid** = shared across workers, **dashed** = private to one worker, **dotted** = context reference.
 
 Core invariant: **Workers propose → Verifier commits → Codex integrates.**
-
-## Roadmap
-
-**Router and orchestration**
-
-- [x] Preview and persist an explainable task-contract graph without executing it.
-- [ ] Add dependency-aware parallel and sequential worker scheduling.
-- [ ] Route by task difficulty, risk, context size, model capability, and policy.
-- [ ] Add retry budgets, fallback chains, and callback delivery policies.
-
-**Shared memory and files**
-
-- [ ] Complete worker context refresh for long-running tasks.
-- [ ] Enforce concurrent file leases and conflict-aware patch merging.
-- [ ] Add compact task summaries with drill-down context and artifacts.
-- [ ] Evaluate retrieval and memory policies against long-horizon coding tasks.
-
-**Verification and safety**
-
-- [ ] Add pluggable test, lint, type-check, and patch-applicability verifiers.
-- [ ] Introduce confidence scoring and verifier-driven rework loops.
-- [ ] Add authenticated remote dashboard access and privacy controls.
-
-**Harness ecosystem**
-
-- [ ] Implement the OpenCode adapter and cross-harness context contract.
-- [ ] Add writable Codex subagents with the same bounded-patch policy.
-- [ ] Define an adapter SDK for Aider, Roo, custom CLIs, and MCP delegators.
-- [ ] Package the project as a versioned Codex plugin for easier distribution.
 
 ## Quick Start
 
@@ -213,8 +164,41 @@ C4Harness separates user authorization from host enforcement:
 Repository inputs default to `private`. When a user explicitly asks Codex to use
 Claude on named repository files, the Skill passes `--external-policy allow
 --data-classification private`. This avoids treating an explicit request as
-missing consent. It does not override Codex sandbox, approval, organization, or
-data-egress policy, which may still deny execution.
+missing consent.
+
+Before a blocked or potentially sensitive external delegation is retried, the
+installed Skill requires Codex to summarize the task-specific risks for the
+user. The summary should identify, as applicable:
+
+- which source files, logs, context packs, or generated artifacts may leave the
+  local environment;
+- which external provider and model will receive them;
+- whether the worker receives read, shell, network, or staged-write access;
+- possible exposure of secrets, personal data, proprietary code, or unrelated
+  repository content;
+- the write allowlist, expected outputs, callback behavior, and the practical
+  impact of a compromised or incorrect worker.
+
+Codex should then wait for explicit confirmation. After confirmation, it may
+retry the same bounded operation once with `allow/private`, using only the
+approved paths and permissions. It must not silently broaden the transfer,
+change providers, or route around a second rejection.
+
+> [!WARNING]
+> **Codex may still refuse the operation after the user consents.** `allow`
+> records the user's authorization inside C4Harness; it does not override the
+> Codex sandbox, command approval, organization policy, secret detection, or
+> data-egress controls. A host-policy rejection should be reported as such and
+> must not be counted as a worker capability failure.
+
+> [!CAUTION]
+> **Full Access is an optional, high-risk troubleshooting choice.** If the user
+> understands the consequences, they may try running Codex with Full Access to
+> reduce filesystem, network, or command-approval friction. This gives Codex and
+> invoked tools substantially broader access to the machine and repository, so
+> use it only in a trusted workspace, review the exact transfer scope, exclude
+> credentials and unrelated files, and prefer a disposable environment. Full
+> Access still may not bypass independent organization or data-egress policy.
 
 ### Preview decomposition
 
@@ -241,6 +225,20 @@ are not mixed into the per-task shared context/artifact memory graph. Worker
 capabilities are loaded from `~/.config/cost-router/workers.json` (or
 `COST_ROUTER_WORKERS`). The same manifest can be edited on the Dashboard's
 **Worker Configuration** page.
+
+Each Worker keeps the actual upstream model separate from the CLI alias used by
+its harness. For example, a Claude Code configuration may declare
+`model=mimo-v2.5-pro` and `model_alias=opus`; C4Harness passes `opus` to
+`claude --model`, allowing Claude Code's `ANTHROPIC_DEFAULT_OPUS_MODEL` mapping
+to select the custom model. Execute a configured entry with:
+
+```bash
+cost-router run --worker-id claude-mimo-pro --goal "review this module" --path src/ --json
+```
+
+The Worker editor presents hard capabilities as checkboxes, switches, selects,
+and context limits, while soft capabilities use 0–1 sliders. Backend/adapter is
+derived from the selected Harness instead of being a duplicate user setting.
 
 ### Open the dashboard
 
@@ -329,6 +327,50 @@ python3 -m cost_router run \
   --execute
 ```
 
+### Asynchronous Tasks
+
+`async-task` is one optional runtime pattern for long-running workloads; it is
+not required for ordinary delegation and is not training-specific. It can own a
+workload, periodically send bounded log snapshots to the same resumable Claude
+session when those logs change, and persist significant or terminal events in a
+durable Codex Inbox.
+
+```bash
+cost-router async-task start \
+  --external-policy allow \
+  --data-classification private \
+  --goal "Monitor this long job and return actionable failures or completion" \
+  --command "bash scripts/run_job.sh --config configs/job.yaml" \
+  --log-path outputs/progress.log \
+  --interval 60
+```
+
+The default `--callback auto` is intentionally inbox-only. Normal completion,
+failure, cancellation, timeout, and requests for input are queued locally and
+can be inspected and acknowledged without starting another Codex model turn.
+The Python runtime compares file size and modification time first; unchanged
+logs do not call Claude, and repeated idle checks use bounded exponential
+backoff.
+
+```bash
+cost-router async-task status async_123456789abc
+cost-router async-task events async_123456789abc
+cost-router async-task inbox --unread-only
+cost-router async-task ack 42
+cost-router async-task stop async_123456789abc
+cost-router async-task retry-callbacks async_123456789abc
+```
+
+`--callback codex-resume` remains an explicit compatibility option. It launches
+a separate, read-only `codex exec resume` process. A successful exit is recorded
+as `callback_executed`, not `delivered`, because it does not prove that the
+currently visible IDE/App conversation received the message. Only a host adapter
+that returns an acknowledgement may mark an event as acknowledged/delivered.
+
+The deterministic Python runtime process handles scheduling and decides process
+exit, marker files, timeout, and cancellation. It does not use model tokens.
+Claude analyzes snapshots but cannot override those facts.
+
 ### Bounded Patch Proposal
 
 Use patch mode when a worker may edit a small, explicit file set:
@@ -382,3 +424,32 @@ also records `CODEX_THREAD_ID` when available and the Skill supplies a shared
 Estimates use file byte size / 4 as a rough token proxy. Very small tasks may report `estimated_main_tokens_saved=0` when the worker summary is longer than the delegated input.
 
 > **Privacy:** Do not send private source code, credentials, or logs to an external provider unless that data transfer is approved.
+
+## Roadmap
+
+**Router and orchestration**
+
+- [x] Preview and persist an explainable task-contract graph without executing it.
+- [ ] Add dependency-aware parallel and sequential worker scheduling.
+- [ ] Route by task difficulty, risk, context size, model capability, and policy.
+- [ ] Add retry budgets, fallback chains, and callback delivery policies.
+
+**Shared memory and files**
+
+- [ ] Complete worker context refresh for long-running tasks.
+- [ ] Enforce concurrent file leases and conflict-aware patch merging.
+- [ ] Add compact task summaries with drill-down context and artifacts.
+- [ ] Evaluate retrieval and memory policies against long-horizon coding tasks.
+
+**Verification and safety**
+
+- [ ] Add pluggable test, lint, type-check, and patch-applicability verifiers.
+- [ ] Introduce confidence scoring and verifier-driven rework loops.
+- [ ] Add authenticated remote dashboard access and privacy controls.
+
+**Harness ecosystem**
+
+- [ ] Implement the OpenCode adapter and cross-harness context contract.
+- [ ] Add writable Codex subagents with the same bounded-patch policy.
+- [ ] Define an adapter SDK for Aider, Roo, custom CLIs, and MCP delegators.
+- [ ] Package the project as a versioned Codex plugin for easier distribution.

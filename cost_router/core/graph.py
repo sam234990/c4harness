@@ -177,6 +177,7 @@ class WorkerArm:
     backend: str
     harness: str
     model: str
+    model_alias: str | None = None
     model_version: str | None = None
     policy_profile: str = "default"
     enabled: bool = True
@@ -188,6 +189,7 @@ class WorkerArm:
             "backend": self.backend,
             "harness": self.harness,
             "model": self.model,
+            "model_alias": self.model_alias,
             "model_version": self.model_version,
             "policy_profile": self.policy_profile,
             "enabled": self.enabled,

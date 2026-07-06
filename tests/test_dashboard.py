@@ -172,11 +172,14 @@ class DashboardTests(unittest.TestCase):
                 base = f"http://127.0.0.1:{server.server_port}"
                 with urlopen(base, timeout=2) as response:
                     page = response.read().decode("utf-8")
+                with urlopen(f"{base}/c4.png", timeout=2) as response:
+                    icon = response.read()
                 with urlopen(f"{base}/api/metadata", timeout=2) as response:
                     metadata = json.load(response)
                 with urlopen(f"{base}/api/overview?range=all", timeout=2) as response:
                     payload = json.load(response)
-                self.assertIn("Cost Router Console", page)
+                self.assertIn("C4Harness Console", page)
+                self.assertTrue(icon.startswith(b"\x89PNG\r\n\x1a\n"))
                 self.assertTrue(metadata["csrf_token"])
                 self.assertTrue(metadata["worker_config_write_enabled"])
                 self.assertEqual(payload["totals"]["calls"], 0)

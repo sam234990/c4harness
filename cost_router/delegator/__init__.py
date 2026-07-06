@@ -11,12 +11,22 @@ from typing import TYPE_CHECKING, Any
 from .runtime import DelegationOutcome, DelegationRuntime, PreparedWorker
 
 if TYPE_CHECKING:
-    from .async_runtime import AsyncTaskConfig, AsyncTaskRuntime, AsyncTaskStore
+    from .async_runtime import (
+        AsyncTaskConfig,
+        AsyncTaskRuntime,
+        AsyncTaskStore,
+        CallbackNotifier,
+        CallbackOutcome,
+        CodexExecNotifier,
+    )
 
 __all__ = [
     "AsyncTaskConfig",
     "AsyncTaskRuntime",
     "AsyncTaskStore",
+    "CallbackNotifier",
+    "CallbackOutcome",
+    "CodexExecNotifier",
     "DelegationOutcome",
     "DelegationRuntime",
     "PreparedWorker",
@@ -24,7 +34,14 @@ __all__ = [
 
 
 def __getattr__(name: str) -> Any:
-    if name in {"AsyncTaskConfig", "AsyncTaskRuntime", "AsyncTaskStore"}:
+    if name in {
+        "AsyncTaskConfig",
+        "AsyncTaskRuntime",
+        "AsyncTaskStore",
+        "CallbackNotifier",
+        "CallbackOutcome",
+        "CodexExecNotifier",
+    }:
         from . import async_runtime
 
         return getattr(async_runtime, name)

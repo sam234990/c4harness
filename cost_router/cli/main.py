@@ -92,6 +92,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--claude-command", default="claude", help="Claude CLI command path")
     run.add_argument("--claude-model", default=None, help="Optional Claude CLI model")
+    run.add_argument("--worker-id", default=None, help="Select a configured Worker manifest entry")
+    run.add_argument("--workers", default=None, help="Override the Worker manifest path")
     run.add_argument(
         "--external-policy",
         choices=[item.value for item in ExternalPolicy],
@@ -162,6 +164,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     async_start.add_argument("--claude-command", default="claude")
     async_start.add_argument("--claude-model", default=None)
+    async_start.add_argument("--worker-id", default=None, help="Select a configured Claude Worker")
+    async_start.add_argument("--workers", default=None, help="Override the Worker manifest path")
     async_start.add_argument(
         "--external-policy",
         choices=[item.value for item in ExternalPolicy],
@@ -175,9 +179,12 @@ def build_parser() -> argparse.ArgumentParser:
     async_start.add_argument("--codex-command", default="codex")
     async_start.add_argument(
         "--callback",
-        choices=["auto", "codex-resume", "none"],
+        choices=["auto", "inbox", "codex-resume", "none"],
         default="auto",
-        help="How significant worker and terminal events return to the orchestrator",
+        help=(
+            "How significant events return: auto/inbox safely queue an event; "
+            "codex-resume explicitly runs a headless compatibility callback"
+        ),
     )
     async_start.add_argument(
         "--thread-id", default=None, help="Codex thread to resume; defaults to CODEX_THREAD_ID"
@@ -218,6 +225,21 @@ def build_parser() -> argparse.ArgumentParser:
     async_retry.add_argument("task_id", nargs="?")
     async_retry.add_argument("--memory", default=str(default_memory_path()))
     async_retry.add_argument("--json", action="store_true")
+
+    async_inbox = async_subparsers.add_parser(
+        "inbox", help="List durable asynchronous events awaiting attention"
+    )
+    async_inbox.add_argument("--memory", default=str(default_memory_path()))
+    async_inbox.add_argument("--limit", type=int, default=50)
+    async_inbox.add_argument("--unread-only", action="store_true")
+    async_inbox.add_argument("--thread-id", default=None)
+    async_inbox.add_argument("--json", action="store_true")
+
+    async_ack = async_subparsers.add_parser(
+        "ack", help="Acknowledge one durable asynchronous inbox item"
+    )
+    async_ack.add_argument("inbox_id", type=int)
+    async_ack.add_argument("--memory", default=str(default_memory_path()))
 
     return parser
 
@@ -298,6 +320,11 @@ def decompose_command(args: argparse.Namespace) -> int:
 
 
 def run_command(args: argparse.Namespace) -> int:
+    try:
+        selected_worker = resolve_worker_selection(args)
+    except ValueError as error:
+        print(f"config error: {error}")
+        return 2
     provider = None
     load_env_file_if_exists(Path(args.env_file))
     if args.backend == "codex-subagent":
@@ -348,7 +375,7 @@ def run_command(args: argparse.Namespace) -> int:
         decide = lambda current: route_task(current, provider, args.worker)
         prepare = lambda current: prepare_codex_backend(args, current, provider)
     else:
-        decide = lambda current: make_claude_decision(args, current)
+        decide = lambda current: make_claude_decision(args, current, selected_worker)
         prepare = lambda current: prepare_claude_backend(args, current)
     outcome = runtime.dispatch(
         task,
@@ -429,7 +456,7 @@ def prepare_claude_backend(args: argparse.Namespace, task: Task):
     )
 
 
-def make_claude_decision(args: argparse.Namespace, task: Task):
+def make_claude_decision(args: argparse.Namespace, task: Task, selected_worker=None):
     from ..core.contracts import Difficulty, Risk, RouteDecision
 
     return RouteDecision(
@@ -437,8 +464,8 @@ def make_claude_decision(args: argparse.Namespace, task: Task):
         risk=Risk.PATCH if task.constraints.mode == TaskMode.PATCH else Risk.READ_ONLY,
         can_delegate=True,
         backend="claude_cli",
-        worker="claude_cli",
-        model=args.claude_model or "claude-default",
+        worker=selected_worker.id if selected_worker else "claude_cli",
+        model=selected_worker.model if selected_worker else (args.claude_model or "claude-default"),
         reason=(
             "Patch proposal delegated to an isolated Claude CLI workspace"
             if task.constraints.mode == TaskMode.PATCH
@@ -449,6 +476,28 @@ def make_claude_decision(args: argparse.Namespace, task: Task):
             f"data_classification={task.constraints.data_classification.value}."
         ),
     )
+
+
+def resolve_worker_selection(args: argparse.Namespace):
+    if not getattr(args, "worker_id", None):
+        return None
+    from ..config.workers import WorkerManifestStore
+
+    path = Path(args.workers).expanduser() if getattr(args, "workers", None) else None
+    workers, _ = WorkerManifestStore(path).registry()
+    try:
+        worker = workers[args.worker_id]
+    except KeyError as error:
+        raise ValueError(f"unknown Worker ID: {args.worker_id}") from error
+    if not worker.enabled:
+        raise ValueError(f"Worker is disabled: {worker.id}")
+    if worker.backend != "claude_cli":
+        raise ValueError(
+            f"configured Worker execution currently supports claude_cli only: {worker.backend}"
+        )
+    args.backend = "claude-cli"
+    args.claude_model = worker.model_alias or worker.model
+    return worker
 
 
 def _resolve_from_repo(repo: Path, value: str) -> Path:
@@ -606,11 +655,22 @@ def async_task_command(args: argparse.Namespace) -> int:
     from ..delegator.async_runtime import AsyncTaskConfig, AsyncTaskRuntime, AsyncTaskStore, retry_callbacks
 
     if not args.async_command:
-        print("usage: cost-router async-task {start,status,list,events,stop,retry-callbacks}")
+        print(
+            "usage: cost-router async-task "
+            "{start,status,list,events,stop,inbox,ack,retry-callbacks}"
+        )
         return 2
     memory_path = Path(args.memory).expanduser().resolve()
     store = AsyncTaskStore(memory_path)
     if args.async_command == "start":
+        try:
+            selected_worker = resolve_worker_selection(args)
+        except ValueError as error:
+            print(f"config error: {error}")
+            return 2
+        if selected_worker is not None and selected_worker.backend != "claude_cli":
+            print("config error: async-task currently supports configured Claude CLI workers only")
+            return 2
         policy_error = external_transfer_error(
             args.backend, args.external_policy, args.data_classification
         )
@@ -628,7 +688,7 @@ def async_task_command(args: argparse.Namespace) -> int:
         thread_id = args.thread_id or os.environ.get("CODEX_THREAD_ID") or None
         callback_mode = args.callback
         if callback_mode == "auto":
-            callback_mode = "codex-resume" if thread_id else "none"
+            callback_mode = "inbox"
         if callback_mode == "codex-resume" and not thread_id:
             print("config error: codex-resume callback requires --thread-id or CODEX_THREAD_ID")
             return 2
@@ -645,7 +705,11 @@ def async_task_command(args: argparse.Namespace) -> int:
             failure_file=_resolve_from_repo(repo, args.failure_file) if args.failure_file else None,
             source_thread_id=thread_id,
             source_harness="codex" if thread_id else "cli",
-            callback_mode="codex_resume" if callback_mode == "codex-resume" else "none",
+            callback_mode=(
+                "codex_resume"
+                if callback_mode == "codex-resume"
+                else callback_mode
+            ),
             claude_command=args.claude_command,
             codex_command=args.codex_command,
             external_policy=args.external_policy,
@@ -717,10 +781,22 @@ def async_task_command(args: argparse.Namespace) -> int:
         print("stop requested" if stopped else "task not found or already finished")
         return 0 if stopped else 1
     if args.async_command == "retry-callbacks":
-        attempted, delivered = retry_callbacks(memory_path, args.task_id)
-        payload = {"attempted": attempted, "delivered": delivered}
+        attempted, executed = retry_callbacks(memory_path, args.task_id)
+        payload = {"attempted": attempted, "callback_executed": executed}
         _print_async_payload(payload, args.json)
-        return 0 if attempted == delivered else 1
+        return 0 if attempted == executed else 1
+    if args.async_command == "inbox":
+        payload = store.inbox(
+            limit=args.limit,
+            unread_only=args.unread_only,
+            source_thread_id=args.thread_id,
+        )
+        _print_async_payload(payload, args.json)
+        return 0
+    if args.async_command == "ack":
+        acknowledged = store.acknowledge_inbox(args.inbox_id)
+        print("acknowledged" if acknowledged else "inbox item not found")
+        return 0 if acknowledged else 1
     return 2
 
 
@@ -748,7 +824,13 @@ def _print_async_payload(payload, as_json: bool) -> None:
         return
     if isinstance(payload, list):
         for item in payload:
-            print(f"{item['id']}  {item['status']:<10}  {item['goal']}")
+            if "event_type" in item and "task_id" in item:
+                print(
+                    f"{item['id']}  {item['status']:<12}  "
+                    f"{item['event_type']}  {item['task_id']}"
+                )
+            else:
+                print(f"{item['id']}  {item['status']:<10}  {item['goal']}")
         return
     if "id" in payload:
         print(f"Async task: {payload['id']}")

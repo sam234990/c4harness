@@ -10,7 +10,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
 from ..core.contracts import (
@@ -112,6 +112,26 @@ class WorkerObservation:
     token_usage: Any = None
 
 
+@dataclass(slots=True)
+class CallbackOutcome:
+    """Result of notifying a host about an inbox event.
+
+    ``callback_executed`` means only that a compatibility command exited
+    successfully.  ``acknowledged`` is reserved for adapters that receive an
+    explicit acknowledgement from the host displaying the conversation.
+    """
+
+    status: str
+    error: str | None = None
+    output: str = ""
+
+
+class CallbackNotifier(Protocol):
+    def notify(
+        self, config: "AsyncTaskConfig", event: dict[str, Any], message: str
+    ) -> CallbackOutcome: ...
+
+
 class AsyncTaskStore:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -211,7 +231,7 @@ class AsyncTaskStore:
         *,
         request_callback: bool = False,
     ) -> tuple[dict[str, Any], bool]:
-        callback_status = "pending" if request_callback else "not_requested"
+        callback_status = "queued" if request_callback else "not_requested"
         with sqlite3.connect(self.path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
@@ -226,8 +246,86 @@ class AsyncTaskStore:
                 "SELECT * FROM async_task_events WHERE task_id = ? AND event_key = ?",
                 (task_id, event_key),
             ).fetchone()
+            if request_callback and row is not None:
+                task = conn.execute(
+                    "SELECT source_thread_id FROM async_tasks WHERE id = ?", (task_id,)
+                ).fetchone()
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO async_task_inbox (
+                      event_id, task_id, source_thread_id, event_type, payload_json
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        row["id"],
+                        task_id,
+                        task[0] if task else None,
+                        event_type,
+                        json.dumps(payload),
+                    ),
+                )
         assert row is not None
         return _event_dict(row), cursor.rowcount == 1
+
+    def inbox(
+        self,
+        *,
+        limit: int = 50,
+        unread_only: bool = False,
+        source_thread_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if unread_only:
+            clauses.append("status = 'unread'")
+        if source_thread_id:
+            clauses.append("source_thread_id = ?")
+            params.append(source_thread_id)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(limit)
+        with sqlite3.connect(self.path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                f"SELECT * FROM async_task_inbox{where} ORDER BY id DESC LIMIT ?",
+                params,
+            ).fetchall()
+        items = []
+        for row in rows:
+            item = dict(row)
+            item["payload"] = json.loads(item.pop("payload_json"))
+            items.append(item)
+        return items
+
+    def acknowledge_inbox(self, inbox_id: int) -> bool:
+        with sqlite3.connect(self.path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT event_id FROM async_task_inbox WHERE id = ?", (inbox_id,)
+            ).fetchone()
+            if row is None:
+                return False
+            conn.execute(
+                """
+                UPDATE async_task_inbox
+                SET status = 'acknowledged', acknowledged_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (inbox_id,),
+            )
+            conn.execute(
+                """
+                UPDATE async_task_events
+                SET callback_status = 'acknowledged',
+                    acknowledged_at = CURRENT_TIMESTAMP,
+                    delivered_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND callback_status IN (
+                    'queued', 'pending', 'callback_executed', 'failed'
+                  )
+                """,
+                (row["event_id"],),
+            )
+        return True
 
     def events(self, task_id: str, limit: int = 100) -> list[dict[str, Any]]:
         with sqlite3.connect(self.path) as conn:
@@ -242,7 +340,10 @@ class AsyncTaskStore:
         return [_event_dict(row) for row in rows]
 
     def pending_callbacks(self, task_id: str | None = None) -> list[dict[str, Any]]:
-        query = "SELECT * FROM async_task_events WHERE callback_status IN ('pending', 'failed')"
+        query = (
+            "SELECT * FROM async_task_events "
+            "WHERE callback_status IN ('queued', 'pending', 'failed')"
+        )
         params: tuple[Any, ...] = ()
         if task_id:
             query += " AND task_id = ?"
@@ -258,26 +359,45 @@ class AsyncTaskStore:
             cursor = conn.execute(
                 """
                 UPDATE async_task_events
-                SET callback_status = 'delivering'
-                WHERE id = ? AND callback_status IN ('pending', 'failed')
+                SET callback_status = 'executing'
+                WHERE id = ? AND callback_status IN ('queued', 'pending', 'failed')
                 """,
                 (event_id,),
             )
         return cursor.rowcount == 1
 
-    def finish_callback(self, event_id: int, error: str | None) -> None:
-        status = "delivered" if error is None else "failed"
-        delivered = ", delivered_at = CURRENT_TIMESTAMP" if error is None else ""
+    def finish_callback(self, event_id: int, outcome: CallbackOutcome) -> None:
+        if outcome.status not in {"callback_executed", "acknowledged", "delivered", "failed"}:
+            raise ValueError(f"Unsupported callback outcome: {outcome.status}")
+        executed = (
+            ", executed_at = CURRENT_TIMESTAMP"
+            if outcome.status in {"callback_executed", "acknowledged", "delivered"}
+            else ""
+        )
+        acknowledged = (
+            ", acknowledged_at = CURRENT_TIMESTAMP, delivered_at = CURRENT_TIMESTAMP"
+            if outcome.status in {"acknowledged", "delivered"}
+            else ""
+        )
         with sqlite3.connect(self.path) as conn:
             conn.execute(
                 f"""
                 UPDATE async_task_events
                 SET callback_status = ?, callback_attempts = callback_attempts + 1,
-                    callback_error = ?{delivered}
+                    callback_error = ?{executed}{acknowledged}
                 WHERE id = ?
                 """,
-                (status, error, event_id),
+                (outcome.status, outcome.error, event_id),
             )
+            if outcome.status in {"acknowledged", "delivered"}:
+                conn.execute(
+                    """
+                    UPDATE async_task_inbox
+                    SET status = 'acknowledged', acknowledged_at = CURRENT_TIMESTAMP
+                    WHERE event_id = ?
+                    """,
+                    (event_id,),
+                )
 
 
 class ClaudeWorkerSession:
@@ -443,6 +563,8 @@ class AsyncTaskRuntime:
                     "task.started",
                     {"workload_pid": process.pid, "command": config.workload_command},
                 )
+                last_snapshot_signature = _snapshot_signature(config, workload_log)
+                check_interval = config.interval_sec
                 next_check = time.monotonic() + config.interval_sec
                 while True:
                     current = self.store.get(config.id) or {}
@@ -480,16 +602,24 @@ class AsyncTaskRuntime:
                             },
                             request_callback=_callback_requested(config, event_type),
                         )
-                        if inserted and event["callback_status"] == "pending":
+                        if inserted and event["callback_status"] == "queued":
                             deliver_callback(self.store, config, event)
                         return 0 if status == "completed" else 1
 
                     now = time.monotonic()
                     if worker and now >= next_check:
-                        observation = self._observe(worker, config, workload_log, "periodic")
-                        if observation:
-                            self._record_observation(config, observation)
-                        next_check = now + config.interval_sec
+                        signature = _snapshot_signature(config, workload_log)
+                        if signature != last_snapshot_signature:
+                            observation = self._observe(worker, config, workload_log, "periodic")
+                            if observation:
+                                self._record_observation(config, observation)
+                            last_snapshot_signature = signature
+                            check_interval = config.interval_sec
+                        else:
+                            check_interval = _next_backoff_interval(
+                                config.interval_sec, check_interval
+                            )
+                        next_check = now + check_interval
                     time.sleep(min(0.5, max(0.05, config.interval_sec / 4)))
         except Exception as error:
             if process and process.poll() is None:
@@ -502,7 +632,7 @@ class AsyncTaskRuntime:
                 {"status": "failed", "reason": "runtime_error", "summary": str(error)},
                 request_callback=_callback_requested(config, "task.failed"),
             )
-            if inserted and event["callback_status"] == "pending":
+            if inserted and event["callback_status"] == "queued":
                 deliver_callback(self.store, config, event)
             return 1
 
@@ -576,7 +706,7 @@ class AsyncTaskRuntime:
             },
             request_callback=request_callback and _callback_requested(config, event_type),
         )
-        if inserted and event["callback_status"] == "pending":
+        if inserted and event["callback_status"] == "queued":
             deliver_callback(self.store, config, event)
 
 
@@ -588,8 +718,65 @@ def build_snapshot(config: AsyncTaskConfig, workload_log: Path) -> str:
     return "\n\n".join(sections)
 
 
+def _snapshot_signature(config: AsyncTaskConfig, workload_log: Path) -> tuple[Any, ...]:
+    """Return a cheap deterministic signature without reading file contents."""
+
+    signature: list[Any] = []
+    for path in dict.fromkeys([workload_log, *config.log_paths]):
+        try:
+            stat = path.stat()
+            signature.append((str(path), True, stat.st_size, stat.st_mtime_ns))
+        except OSError:
+            signature.append((str(path), False, 0, 0))
+    return tuple(signature)
+
+
+def _next_backoff_interval(base: float, current: float) -> float:
+    """Exponentially back off unchanged snapshots, capped at five minutes."""
+
+    return min(max(base, current * 2), max(base, min(300.0, base * 16)))
+
+
+class CodexExecNotifier:
+    """Compatibility notifier; successful execution is not a UI acknowledgement."""
+
+    def notify(
+        self, config: AsyncTaskConfig, event: dict[str, Any], message: str
+    ) -> CallbackOutcome:
+        completed = subprocess.run(
+            [
+                config.codex_command,
+                "exec",
+                "resume",
+                "-c",
+                'sandbox_mode="read-only"',
+                "-c",
+                'approval_policy="never"',
+                config.source_thread_id or "",
+                message,
+            ],
+            cwd=config.repo,
+            env=os.environ.copy(),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=1800,
+            check=False,
+        )
+        if completed.returncode == 0:
+            return CallbackOutcome("callback_executed", output=completed.stdout)
+        return CallbackOutcome(
+            "failed",
+            error=_truncate(completed.stdout, 2000),
+            output=completed.stdout,
+        )
+
+
 def deliver_callback(
-    store: AsyncTaskStore, config: AsyncTaskConfig, event: dict[str, Any]
+    store: AsyncTaskStore,
+    config: AsyncTaskConfig,
+    event: dict[str, Any],
+    notifier: CallbackNotifier | None = None,
 ) -> bool:
     if config.callback_mode != "codex_resume" or not config.source_thread_id:
         return False
@@ -604,49 +791,41 @@ def deliver_callback(
             f"Summary: {payload.get('summary') or payload.get('reason') or 'No summary'}",
             f"Recommended action: {payload.get('recommended_action') or 'Review the event and respond.'}",
             f"Repository: {config.repo}",
-            "Inspect the async-task status and logs, then decide whether to report, fix, or restart.",
+            "This is a compatibility notification, not proof that a visible UI received it.",
+            "Do not modify files or run commands. Briefly acknowledge the event only.",
         ]
     )
     task_dir = _task_dir(store.path, config.id)
     task_dir.mkdir(parents=True, exist_ok=True)
     callback_log = task_dir / f"callback-{event['id']}.log"
     try:
-        completed = subprocess.run(
-            [config.codex_command, "exec", "resume", config.source_thread_id, message],
-            cwd=config.repo,
-            env=os.environ.copy(),
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=1800,
-            check=False,
-        )
-        callback_log.write_text(completed.stdout, encoding="utf-8")
-        error = None if completed.returncode == 0 else _truncate(completed.stdout, 2000)
+        outcome = (notifier or CodexExecNotifier()).notify(config, event, message)
+        callback_log.write_text(outcome.output or outcome.error or "", encoding="utf-8")
     except Exception as exc:
-        error = str(exc)
-        callback_log.write_text(error, encoding="utf-8")
-    store.finish_callback(event["id"], error)
-    return error is None
+        outcome = CallbackOutcome("failed", error=str(exc), output=str(exc))
+        callback_log.write_text(outcome.output, encoding="utf-8")
+    store.finish_callback(event["id"], outcome)
+    return outcome.status in {"callback_executed", "acknowledged", "delivered"}
 
 
 def retry_callbacks(memory_path: Path, task_id: str | None = None) -> tuple[int, int]:
     store = AsyncTaskStore(memory_path)
-    attempted = delivered = 0
+    attempted = executed = 0
     for event in store.pending_callbacks(task_id):
         record = store.get(event["task_id"])
         if not record:
             continue
         config = AsyncTaskConfig.from_record(record)
+        if config.callback_mode != "codex_resume":
+            continue
         attempted += 1
-        delivered += int(deliver_callback(store, config, event))
-    return attempted, delivered
+        executed += int(deliver_callback(store, config, event))
+    return attempted, executed
 
 
 def _callback_requested(config: AsyncTaskConfig, event_type: str) -> bool:
     return (
-        config.callback_mode == "codex_resume"
-        and bool(config.source_thread_id)
+        config.callback_mode in {"inbox", "codex_resume"}
         and event_type in CALLBACK_EVENT_TYPES
     )
 

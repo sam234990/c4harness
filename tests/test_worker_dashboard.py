@@ -21,10 +21,13 @@ class WorkerDashboardTests(unittest.TestCase):
             ledger = Path(tmp) / "ledger.sqlite3"
             manifest = Path(tmp) / "workers.json"
             MemoryStore(ledger).init()
-            server = ThreadingHTTPServer(
-                ("127.0.0.1", 0),
-                _handler(AnalyticsStore(ledger), worker_store=WorkerManifestStore(manifest)),
-            )
+            try:
+                server = ThreadingHTTPServer(
+                    ("127.0.0.1", 0),
+                    _handler(AnalyticsStore(ledger), worker_store=WorkerManifestStore(manifest)),
+                )
+            except PermissionError:
+                self.skipTest("local sockets are disabled by the test sandbox")
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
