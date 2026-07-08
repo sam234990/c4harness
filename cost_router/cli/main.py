@@ -111,7 +111,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--json", action="store_true", help="Print JSON output")
 
     decompose = subparsers.add_parser("decompose", help="Preview a task contract graph")
-    decompose.add_argument("--goal", required=True)
+    decompose_source = decompose.add_mutually_exclusive_group(required=True)
+    decompose_source.add_argument("--goal", help="Legacy goal-based preview input")
+    decompose_source.add_argument(
+        "--plan-file",
+        help="Codex-authored task proposal JSON to validate, compile, and assign",
+    )
     decompose.add_argument("--repo", default=".")
     decompose.add_argument("--path", action="append", default=[])
     decompose.add_argument("--context-pack", action="append", default=[])
@@ -233,35 +238,19 @@ def decompose_command(args: argparse.Namespace) -> int:
     from ..config.workers import WorkerManifestStore
     from ..decompose import (
         AcceptanceCriterion,
+        CodexTaskProposal,
         DecompositionPlanner,
         InteractionMode,
         Requirement,
         RequirementKind,
         TaskSituationBuilder,
         WorkerRegistry,
+        compile_proposal,
     )
+    from ..decompose import ProposalCompileError, ProposalParseError
     from ..history import PlanSnapshot, SQLiteHistoryRepository, build_capability_profile
 
     repo = Path(args.repo).resolve()
-    write_paths = [_resolve_from_repo(repo, item) for item in args.write_path]
-    task = Task(
-        goal=args.goal,
-        repo=repo,
-        paths=[_resolve_from_repo(repo, item) for item in args.path],
-        write_paths=write_paths,
-        context_packs=[_resolve_from_repo(repo, item) for item in args.context_pack],
-        constraints=TaskConstraints(mode=TaskMode.PATCH if write_paths else TaskMode.READ_ONLY),
-    )
-    deliverables = list(args.requirement) or [args.goal]
-    requirements = [
-        *[Requirement(f"R{index}", text, RequirementKind.DELIVERABLE) for index, text in enumerate(deliverables, 1)],
-        *[Requirement(f"C{index}", text, RequirementKind.CONSTRAINT) for index, text in enumerate(args.constraint, 1)],
-    ]
-    required_refs = tuple(item.id for item in requirements if item.required)
-    criteria = [
-        AcceptanceCriterion(f"A{index}", text, requirement_refs=required_refs)
-        for index, text in enumerate(args.acceptance, 1)
-    ] or None
     manifest_store = WorkerManifestStore(Path(args.workers).expanduser() if args.workers else None)
     workers, preferences = manifest_store.registry()
     registry = WorkerRegistry(workers)
@@ -270,27 +259,78 @@ def decompose_command(args: argparse.Namespace) -> int:
         worker_id: build_capability_profile(worker_id, history.outcomes_for_worker(worker_id))
         for worker_id in workers
     }
-    builder = TaskSituationBuilder()
-    situation = builder.from_task(
-        task,
-        requirements=requirements,
-        acceptance_criteria=criteria,
-        interaction_mode=InteractionMode.PLAN if args.plan_mode else InteractionMode.EXECUTE,
-        active_skills=args.active_skill,
-        skill_steps=args.skill_step,
-        environment_facts=args.environment_fact,
-        unresolved_questions=args.unresolved_question,
-        workers=workers.values(),
-        historical_profile_summary=[
-            f"{worker_id}:samples={sum(item.usable_sample_count for item in profile.evidence)}"
-            for worker_id, profile in profiles.items()
-        ],
-    )
-    planner = DecompositionPlanner(
-        worker_preferences=preferences,
-        capability_profiles=profiles,
-    )
-    plan = planner.plan(task, situation, registry)
+    try:
+        if args.plan_file:
+            plan_path = Path(args.plan_file).expanduser()
+            if not plan_path.is_absolute():
+                plan_path = repo / plan_path
+            proposal = CodexTaskProposal.from_json(
+                plan_path.read_text(encoding="utf-8")
+            )
+            plan = compile_proposal(
+                proposal,
+                repo,
+                registry,
+                worker_preferences=preferences,
+                capability_profiles=profiles,
+            )
+        else:
+            write_paths = [_resolve_from_repo(repo, item) for item in args.write_path]
+            task = Task(
+                goal=args.goal,
+                repo=repo,
+                paths=[_resolve_from_repo(repo, item) for item in args.path],
+                write_paths=write_paths,
+                context_packs=[_resolve_from_repo(repo, item) for item in args.context_pack],
+                constraints=TaskConstraints(
+                    mode=TaskMode.PATCH if write_paths else TaskMode.READ_ONLY
+                ),
+            )
+            deliverables = list(args.requirement) or [args.goal]
+            requirements = [
+                *[
+                    Requirement(f"R{index}", text, RequirementKind.DELIVERABLE)
+                    for index, text in enumerate(deliverables, 1)
+                ],
+                *[
+                    Requirement(f"C{index}", text, RequirementKind.CONSTRAINT)
+                    for index, text in enumerate(args.constraint, 1)
+                ],
+            ]
+            required_refs = tuple(item.id for item in requirements if item.required)
+            criteria = [
+                AcceptanceCriterion(f"A{index}", text, requirement_refs=required_refs)
+                for index, text in enumerate(args.acceptance, 1)
+            ] or None
+            builder = TaskSituationBuilder()
+            situation = builder.from_task(
+                task,
+                requirements=requirements,
+                acceptance_criteria=criteria,
+                interaction_mode=(
+                    InteractionMode.PLAN if args.plan_mode else InteractionMode.EXECUTE
+                ),
+                active_skills=args.active_skill,
+                skill_steps=args.skill_step,
+                environment_facts=args.environment_fact,
+                unresolved_questions=args.unresolved_question,
+                workers=workers.values(),
+                historical_profile_summary=[
+                    f"{worker_id}:samples={sum(item.usable_sample_count for item in profile.evidence)}"
+                    for worker_id, profile in profiles.items()
+                ],
+            )
+            planner = DecompositionPlanner(
+                worker_preferences=preferences,
+                capability_profiles=profiles,
+            )
+            plan = planner.plan(task, situation, registry)
+    except (OSError, ProposalParseError, ProposalCompileError, ValueError) as error:
+        if args.json:
+            print(json.dumps({"error": str(error)}, ensure_ascii=False, indent=2))
+        else:
+            print(f"decompose error: {error}")
+        return 2
     history.append_plan(PlanSnapshot.from_plan(plan))
     payload = plan.to_dict()
     if args.json:
@@ -387,6 +427,17 @@ def run_command(args: argparse.Namespace) -> int:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         print_human(payload)
+    return delegation_exit_code(args.execute, result, verification)
+
+
+def delegation_exit_code(executed: bool, result, verification) -> int:
+    """Return a shell-friendly status for one delegated worker invocation."""
+    if not executed:
+        return 0
+    if result is None or result.status != "success":
+        return 1
+    if verification is None or not verification.accepted:
+        return 1
     return 0
 
 

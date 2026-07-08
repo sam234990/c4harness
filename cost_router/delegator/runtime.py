@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 from ..core.contracts import RouteDecision, Task, VerificationResult, WorkerResult
 from ..hooks import HookSet
+from ..history.attribution import attribute_outcome
+from ..history.repository import ExecutionHistoryRepository
 from ..memory import MemoryStore
 from ..verifier import verify_worker_result
 
@@ -56,10 +59,12 @@ class DelegationRuntime:
         *,
         hooks: HookSet | None = None,
         verifier: Verifier = verify_worker_result,
+        history: ExecutionHistoryRepository | None = None,
     ) -> None:
         self.store = store
         self.hooks = hooks or HookSet()
         self.verifier = verifier
+        self.history = history
 
     def dispatch(
         self,
@@ -68,6 +73,11 @@ class DelegationRuntime:
         decide: DecisionFactory,
         prepare: PreparationFactory,
         execute: bool,
+        node_id: str = "default",
+        worker_arm_id: str | None = None,
+        capability_dimensions: tuple[str, ...] = (),
+        artifact_refs: tuple[str, ...] = (),
+        verifier: Verifier | None = None,
     ) -> DelegationOutcome:
         # Fail before invoking a paid worker when the selected ledger cannot be opened.
         self.store.init()
@@ -78,8 +88,10 @@ class DelegationRuntime:
 
         result: WorkerResult | None = None
         verification: VerificationResult | None = None
+        exception: Exception | None = None
         if execute:
             self.hooks.pre_delegate(task, decision)
+            start_ms = time.monotonic_ns() // 1_000_000
             try:
                 result = prepared.runner(
                     task=task,
@@ -89,14 +101,16 @@ class DelegationRuntime:
                     cwd=task.repo,
                 )
             except Exception as error:
+                exception = error
                 result = WorkerResult(
                     status="failed",
                     summary=f"Worker backend raised {type(error).__name__}: {error}",
                     risks=["The worker did not return a normal result."],
                     next_steps=["Inspect the backend error and retry only after it is resolved."],
                 )
+            elapsed_ms = time.monotonic_ns() // 1_000_000 - start_ms
             self.hooks.post_delegate(task, result)
-            verification = self.verifier(result, task.repo, task)
+            verification = (verifier or self.verifier)(result, task.repo, task)
             self.hooks.post_verify(task, verification)
             self.store.record_subtask(
                 task=task,
@@ -104,6 +118,19 @@ class DelegationRuntime:
                 result=result,
                 verification=verification,
             )
+            if self.history is not None:
+                outcome = attribute_outcome(
+                    task_id=task.id,
+                    node_id=node_id,
+                    worker_arm_id=worker_arm_id or decision.worker,
+                    result=result,
+                    verification=verification,
+                    exception=exception,
+                    capability_dimensions=capability_dimensions,
+                    artifact_refs=artifact_refs,
+                    latency_ms=elapsed_ms,
+                )
+                self.history.append_outcome(outcome)
         else:
             self.store.record_subtask(task=task, decision=decision)
 

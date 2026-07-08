@@ -1,7 +1,7 @@
 # C4 Verifier Method
 
-**Status**: module design draft  
-**Date**: 2026-07-05
+**Status**: first deterministic implementation available
+**Date**: 2026-07-07
 
 ## 1. 定位
 
@@ -59,5 +59,6 @@ Root Verifier 输出验收证据；最终向用户报告和是否继续执行由
 
 ## 6. 第一版本与 Future Work
 
-第一版本实现 structural、policy、grounding 和基础 executable checks，并保留 `inconclusive`。Future Work 包括 semantic reviewer、verifier ensemble、差异测试、复杂 patch integration 和更可靠的 failure attribution。
+第一版本已经实现 contract-aware 节点验证、受限确定性模板执行、`accepted/rejected/inconclusive/blocked` 语义、失败归因以及 Root Contract coverage/traceability。无法由本地确定性证据证明的 semantic criterion 必须由 Codex/人工 reviewer 显式决定，不能自动通过。
 
+Future Work 包括 semantic reviewer、verifier ensemble、差异测试、复杂 patch integration、更精确的 artifact ownership/冲突模型和更可靠的 failure attribution。

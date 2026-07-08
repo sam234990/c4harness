@@ -9,6 +9,7 @@ public import surface.
 from typing import TYPE_CHECKING, Any
 
 from .runtime import DelegationOutcome, DelegationRuntime, PreparedWorker
+from .scheduler import GraphResult, GraphScheduler, NodeOutcome, NodeState
 
 if TYPE_CHECKING:
     from .async_runtime import (
@@ -24,6 +25,10 @@ __all__ = [
     "DelegationOutcome",
     "DelegationRuntime",
     "PreparedWorker",
+    "GraphResult",
+    "GraphScheduler",
+    "NodeOutcome",
+    "NodeState",
 ]
 
 

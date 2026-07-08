@@ -16,6 +16,15 @@ from cost_router.usage.aggregation import AnalyticsStore
 
 
 class WorkerDashboardTests(unittest.TestCase):
+    def test_worker_page_has_visible_save_feedback(self) -> None:
+        root = Path(__file__).resolve().parents[1] / "cost_router" / "web"
+        html = (root / "index.html").read_text(encoding="utf-8")
+        javascript = (root / "app.js").read_text(encoding="utf-8")
+        self.assertIn('id="workers-save-status"', html)
+        self.assertIn('aria-live="polite"', html)
+        self.assertIn('button.textContent = t("savingConfig")', javascript)
+        self.assertIn('const confirmed = await api("/api/workers")', javascript)
+
     def test_worker_manifest_http_round_trip_and_csrf(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             ledger = Path(tmp) / "ledger.sqlite3"

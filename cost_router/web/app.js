@@ -18,7 +18,7 @@ const I18N = {
     notReported: "未报告", never: "暂无调用", updated: "最近调用 {time}", noData: "暂无数据", readOnly: "只读", patch: "Patch",
     titleAsyncTasks: "异步任务", subAsyncTasks: "按 Codex 对话组织的运行状态与未读结果", asyncInbox: "C4 Inbox", asyncAttention: "异步任务需要处理", asyncAttentionSub: "Codex 当前不能被外部 Worker 自动唤醒；结果会可靠保存在这里。", openInbox: "查看异步任务", asyncPageHelp: "按来源 Codex 对话查看正在运行和尚未处理的异步任务。确认表示结果已被用户或 Codex 处理。", refresh: "刷新", noAsyncTasks: "暂无异步任务", unreadTasks: "未读", runningTasks: "运行中", completedTasks: "已结束", acknowledge: "标记已处理", unattached: "未关联对话", pending: "等待中", running: "运行中", completed: "已完成", failed: "失败", cancelled: "已取消", timed_out: "已超时", taskSummary: "任务摘要",
     titleWorkers: "Worker 配置", subWorkers: "全局能力、偏好和执行边界", addWorker: "新增 Worker", resetDefaults: "恢复默认", saveWorkers: "保存配置",
-    workerConfigNotice: "Manifest 不保存 API key、Token、Base URL 或其他凭证。Hard 决定能否执行，Soft 决定候选 Worker 的优先级。", enabled: "启用", preference: "整体偏好", remove: "删除", savedConfig: "配置已保存", writeDisabled: "非本机监听时禁止修改配置",
+    workerConfigNotice: "Manifest 不保存 API key、Token、Base URL 或其他凭证。Hard 决定能否执行，Soft 决定候选 Worker 的优先级。", enabled: "启用", preference: "整体偏好", remove: "删除", savedConfig: "配置已保存", savingConfig: "正在保存…", unsavedConfig: "有未保存修改", saveFailed: "保存失败", writeDisabled: "非本机监听时禁止修改配置",
     basicIdentity: "基本信息", hardCapabilities: "Hard Capabilities · 硬约束", softCapabilities: "Soft Capabilities · 能力偏好", hardHelp: "任一必需能力不满足时，该 Worker 会被直接排除。", softHelp: "0 表示不擅长，1 表示强项；后续会由验证历史修正。", harness: "Harness", modelName: "实际模型", modelAlias: "CLI 模型别名", modelAliasHelp: "传给 harness 的选择器，例如 opus；可由 Claude Code 映射到 mimo-v2.5-pro。", adapterDerived: "执行 Adapter（由 Harness 推导）", policyProfile: "策略配置", modalities: "输入模态", tools: "工具", writeIsolation: "写入隔离", network: "联网", structuredOutput: "结构化输出", contextTokens: "上下文 Token", persistentSession: "持续会话", providerProtocol: "Provider 协议", privacyZone: "隐私区域", implementation: "代码实现", debugging: "调试分析", documentation: "文档研究", architecture: "架构设计"
   },
   en: {
@@ -40,7 +40,7 @@ const I18N = {
     notReported: "Not reported", never: "No calls yet", updated: "Latest call {time}", noData: "No data", readOnly: "Read only", patch: "Patch",
     titleAsyncTasks: "Async tasks", subAsyncTasks: "Running state and unread results grouped by Codex conversation", asyncInbox: "C4 Inbox", asyncAttention: "Async tasks need attention", asyncAttentionSub: "Codex cannot currently be awakened by an external worker; results remain safely available here.", openInbox: "Open async tasks", asyncPageHelp: "View running and unread asynchronous tasks by their source Codex conversation. Acknowledge means the result was handled by Codex or the user.", refresh: "Refresh", noAsyncTasks: "No async tasks", unreadTasks: "Unread", runningTasks: "Running", completedTasks: "Finished", acknowledge: "Mark handled", unattached: "Unattached conversation", pending: "Pending", running: "Running", completed: "Completed", failed: "Failed", cancelled: "Cancelled", timed_out: "Timed out", taskSummary: "Task summary",
     titleWorkers: "Worker configuration", subWorkers: "Global capabilities, preferences, and execution boundaries", addWorker: "Add worker", resetDefaults: "Reset defaults", saveWorkers: "Save configuration",
-    workerConfigNotice: "The manifest never stores API keys, tokens, base URLs, or credentials. Hard capabilities determine eligibility; soft capabilities rank eligible workers.", enabled: "Enabled", preference: "Overall preference", remove: "Remove", savedConfig: "Configuration saved", writeDisabled: "Configuration writes are disabled when not bound to loopback",
+    workerConfigNotice: "The manifest never stores API keys, tokens, base URLs, or credentials. Hard capabilities determine eligibility; soft capabilities rank eligible workers.", enabled: "Enabled", preference: "Overall preference", remove: "Remove", savedConfig: "Configuration saved", savingConfig: "Saving…", unsavedConfig: "Unsaved changes", saveFailed: "Save failed", writeDisabled: "Configuration writes are disabled when not bound to loopback",
     basicIdentity: "Basic identity", hardCapabilities: "Hard capabilities", softCapabilities: "Soft capabilities", hardHelp: "A worker is excluded when any required hard capability is missing.", softHelp: "0 means weak and 1 means strong; verified history can refine these priors.", harness: "Harness", modelName: "Actual model", modelAlias: "CLI model alias", modelAliasHelp: "Selector passed to the harness, for example opus; Claude Code may map it to mimo-v2.5-pro.", adapterDerived: "Execution adapter (derived from Harness)", policyProfile: "Policy profile", modalities: "Modalities", tools: "Tools", writeIsolation: "Write isolation", network: "Network", structuredOutput: "Structured output", contextTokens: "Context tokens", persistentSession: "Persistent session", providerProtocol: "Provider protocol", privacyZone: "Privacy zone", implementation: "Implementation", debugging: "Debugging", documentation: "Documentation", architecture: "Architecture"
   }
 };
@@ -145,18 +145,47 @@ function renderWorkers() {
       worker[field] = input.type === "checkbox" ? input.checked : input.type === "range" ? Number(input.value) : input.value;
       if (field === "harness") worker.backend = BACKEND_BY_HARNESS[input.value] || worker.backend;
       if (input.type === "range") input.parentElement.querySelector("output").textContent = Number(input.value).toFixed(2);
+      markWorkersDirty();
     }));
-    card.querySelectorAll("[data-cap-field]").forEach(input => input.addEventListener("change", () => { worker.capabilities[input.dataset.capField] = input.type === "checkbox" ? input.checked : input.type === "number" ? Number(input.value) : input.value; }));
-    card.querySelectorAll("[data-cap-set]").forEach(input => input.addEventListener("change", () => { const field=input.dataset.capSet; worker.capabilities[field] = [...card.querySelectorAll(`[data-cap-set="${field}"]:checked`)].map(item => item.value); }));
-    card.querySelectorAll("[data-soft-field]").forEach(input => input.addEventListener("input", () => { worker.capabilities.soft[input.dataset.softField] = Number(input.value); input.parentElement.querySelector("output").textContent = Number(input.value).toFixed(2); }));
-    card.querySelector(".remove-worker").addEventListener("click", () => { state.workers.workers.splice(index, 1); renderWorkers(); });
+    card.querySelectorAll("[data-cap-field]").forEach(input => input.addEventListener("change", () => { worker.capabilities[input.dataset.capField] = input.type === "checkbox" ? input.checked : input.type === "number" ? Number(input.value) : input.value; markWorkersDirty(); }));
+    card.querySelectorAll("[data-cap-set]").forEach(input => input.addEventListener("change", () => { const field=input.dataset.capSet; worker.capabilities[field] = [...card.querySelectorAll(`[data-cap-set="${field}"]:checked`)].map(item => item.value); markWorkersDirty(); }));
+    card.querySelectorAll("[data-soft-field]").forEach(input => input.addEventListener("input", () => { worker.capabilities.soft[input.dataset.softField] = Number(input.value); input.parentElement.querySelector("output").textContent = Number(input.value).toFixed(2); markWorkersDirty(); }));
+    card.querySelector(".remove-worker").addEventListener("click", () => { state.workers.workers.splice(index, 1); renderWorkers(); markWorkersDirty(); });
   });
 }
 
+function setWorkersSaveStatus(kind, message) {
+  const status = $("#workers-save-status");
+  status.className = `workers-save-status ${kind || ""}`;
+  status.textContent = message || "";
+  $("#workers-message").textContent = message || "";
+}
+
+function markWorkersDirty() {
+  if (!state.workers?.write_enabled) return;
+  setWorkersSaveStatus("dirty", t("unsavedConfig"));
+}
+
 async function saveWorkers() {
-  const response = await fetch("/api/workers", {method:"PUT", headers:{"Content-Type":"application/json", "X-C4-CSRF":state.workers.csrf_token}, body:JSON.stringify({version:state.workers.version, revision:state.workers.revision, workers:state.workers.workers})});
-  const payload = await response.json(); if (!response.ok) throw new Error(payload.error || response.statusText);
-  state.workers = {...state.workers, ...payload}; $("#workers-message").textContent = t("savedConfig"); renderWorkers();
+  const button = $("#save-workers");
+  button.disabled = true;
+  button.textContent = t("savingConfig");
+  setWorkersSaveStatus("saving", t("savingConfig"));
+  try {
+    const response = await fetch("/api/workers", {method:"PUT", headers:{"Content-Type":"application/json", "X-C4-CSRF":state.workers.csrf_token}, body:JSON.stringify({version:state.workers.version, revision:state.workers.revision, workers:state.workers.workers})});
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || response.statusText);
+    const confirmed = await api("/api/workers");
+    state.workers = confirmed;
+    renderWorkers();
+    setWorkersSaveStatus("success", `✓ ${t("savedConfig")}`);
+  } catch (error) {
+    setWorkersSaveStatus("error", `${t("saveFailed")}: ${error.message}`);
+    throw error;
+  } finally {
+    button.disabled = !state.workers?.write_enabled;
+    button.textContent = t("saveWorkers");
+  }
 }
 
 async function loadMetadata() {
@@ -326,9 +355,9 @@ async function init() {
   $("#view-all").addEventListener("click", () => switchPage("calls"));
   $("#view-async-tasks").addEventListener("click", () => switchPage("async-tasks"));
   $("#refresh-async").addEventListener("click", loadAsyncTasks);
-  $("#save-workers").addEventListener("click", () => saveWorkers().catch(error => $("#workers-message").textContent = error.message));
-  $("#reset-workers").addEventListener("click", () => { state.workers.workers = structuredClone(state.workers.defaults); renderWorkers(); });
-  $("#add-worker").addEventListener("click", () => { const item = structuredClone(state.workers.defaults[0]); item.id = `worker-${state.workers.workers.length + 1}`; state.workers.workers.push(item); renderWorkers(); });
+  $("#save-workers").addEventListener("click", () => saveWorkers().catch(() => {}));
+  $("#reset-workers").addEventListener("click", () => { state.workers.workers = structuredClone(state.workers.defaults); renderWorkers(); markWorkersDirty(); });
+  $("#add-worker").addEventListener("click", () => { const item = structuredClone(state.workers.defaults[0]); item.id = `worker-${state.workers.workers.length + 1}`; state.workers.workers.push(item); renderWorkers(); markWorkersDirty(); });
   $("#lang-button").addEventListener("click", async () => { state.lang = state.lang === "zh" ? "en" : "zh"; localStorage.setItem("cost-router-lang", state.lang); applyLanguage(); await Promise.all([loadOverview(), loadChart(), loadRecent(), loadAsyncTasks()]); if ($("#page-calls").classList.contains("active")) loadCalls(); });
   $("#menu-button").addEventListener("click", () => $("#sidebar").classList.toggle("open"));
   bindSegmented("#overview-range", "range", () => Promise.all([loadOverview(), loadChart()]));

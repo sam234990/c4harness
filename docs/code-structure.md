@@ -384,12 +384,13 @@ Dashboard 只展示和筛选，不直接修改历史 outcome。用户偏好和 f
 - `router.py` → 计划迁入 `application/` 或 `cli/`
 - `setup_user.py` → 计划迁入 `cli/commands/setup.py`
 
-**2026-07-05 新增边界**：
+**2026-07-07 新增边界**：
 
-- `history/` 已建立 contracts、repository 和 capability profile 的最小骨架；SQLite store 尚未从旧 `MemoryStore` 迁出。
-- `application/` 已建立 `PrepareTask` 与 `RunNode` use case；完整 `run_graph` 尚未实现。
+- `history/` 已建立 contracts、SQLite repository、outcome attribution 和 capability profile；旧 `MemoryStore.record_decomposition()` 仅作为兼容桥保留。
+- `application/` 已建立 `PrepareTask`、`RunNode`、顺序 `RunGraph`、`GraphExecutionService` 与 `verify_root` use case。
 - `decompose/assignment.py` 与 `decompose/replan.py` 已建立，assignment 已接入现有 planner。
-- `delegator.md`、`verifier.md`、`history.md` 已补充正式方法边界。
+- `delegator/scheduler.py` 已实现依赖驱动的顺序 ready-frontier、失败阻断和终态结果。
+- `verifier/executable.py` 与 `verifier/root.py` 已实现第一版 contract-aware 和 Root Verification。
 
 ## 8. 建议重构顺序
 
@@ -469,4 +470,4 @@ cost_router/
 └── compatibility modules
 ```
 
-尚未完成的结构包括完整 `application/run_graph`、CLI commands 细分、Memory 与 History 的 SQLite schema/repository 迁移、Root Verifier 与 graph scheduler。当前 `MemoryStore.record_decomposition()` 仍把 plan 写入 Shared Memory nodes，这是明确标注的 legacy bridge；在 Dashboard/旧账本兼容迁移完成前不直接删除。
+尚未完成的结构主要包括 CLI commands 进一步细分、Memory 内部 schema/query 的细粒度拆分、并行 graph scheduler、复杂 artifact ownership/merge 和 MCP integration。当前 `MemoryStore.record_decomposition()` 仍把 plan 写入 Shared Memory nodes，这是明确标注的 legacy bridge；在 Dashboard/旧账本兼容迁移完成前不直接删除。

@@ -31,6 +31,15 @@ from .models import (
     WorkerCapabilities,
 )
 from .planner import DecompositionPlanner
+from .compiler import ProposalCompileError, compile_proposal
+from .proposal import (
+    CodexTaskProposal,
+    ProposalAcceptanceCriterion,
+    ProposalNode,
+    ProposalParseError,
+    ProposalRequirement,
+    VerifierPlan,
+)
 from .situation import TaskSituationBuilder
 from .service import DecompositionService
 from .replan import (
@@ -48,6 +57,7 @@ __all__ = [
     "AtomicityAssessment",
     "BoundedReplanner",
     "ConfidenceFactors",
+    "CodexTaskProposal",
     "CapabilityMatch",
     "DecompositionPlan",
     "DecompositionPlanner",
@@ -58,6 +68,11 @@ __all__ = [
     "HardCapabilityRequirements",
     "InteractionMode",
     "NodeKind",
+    "ProposalAcceptanceCriterion",
+    "ProposalCompileError",
+    "ProposalNode",
+    "ProposalParseError",
+    "ProposalRequirement",
     "Requirement",
     "RequirementKind",
     "RequirementLedger",
@@ -74,6 +89,7 @@ __all__ = [
     "TaskSituation",
     "TaskSituationBuilder",
     "VerificationContract",
+    "VerifierPlan",
     "WorkerArm",
     "WorkerAssignmentPolicy",
     "WorkerCapabilities",
@@ -83,4 +99,5 @@ __all__ = [
     "check_atomicity",
     "choose_primary_split",
     "compute_confidence",
+    "compile_proposal",
 ]

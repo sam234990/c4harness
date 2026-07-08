@@ -160,13 +160,19 @@ tbody tr:last-child td { border-bottom: 0; }
 .status-pill.failed, .status-pill.timed_out { background: #fbeceb; color: #a43f38; }
 .status-pill.cancelled { color: #737b77; background: #ecefed; }
 .worker-heading { align-items: center; }
-.worker-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.worker-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .primary-button, .secondary-button, .danger-button { min-height: 34px; padding: 0 12px; border-radius: 6px; }
 .primary-button { color: #fff; background: #166b50; border: 1px solid #166b50; }
 .secondary-button { background: #fff; border: 1px solid var(--line); }
 .danger-button { color: #a53c36; background: #fff; border: 1px solid #e2c1be; }
 .config-notice, .workers-message { color: var(--muted); font-size: 12px; }
 .workers-message { min-height: 24px; margin-top: 12px; }
+.workers-save-status { min-width: 96px; color: var(--muted); font-size: 12px; font-weight: 650; text-align: right; }
+.workers-save-status.dirty { color: #956519; }
+.workers-save-status.saving { color: #426b89; }
+.workers-save-status.success { color: #167052; }
+.workers-save-status.error { color: #a43f38; }
+.primary-button:disabled { cursor: wait; opacity: .7; }
 .workers-list { display: grid; gap: 12px; margin-top: 18px; }
 .worker-card { padding: 18px; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 4px 18px #24352f08; }
 .worker-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; gap: 16px; }

@@ -91,30 +91,88 @@ cost-router run \
 10. Inspect an accepted `proposed_patch_path` before applying it. Apply or reproduce the change in the main workspace, then run the relevant tests in the main session.
 11. Report which work was delegated and distinguish worker findings from conclusions independently verified by the main agent. The global ledger automatically associates calls with the current Codex thread when `CODEX_THREAD_ID` is available.
 
-## Decomposition Preview
+## Codex-Planned Decomposition
 
-Use the deterministic preview before manual delegation when a task has multiple
-deliverables, a Skill workflow, capability-sensitive work, explicit risks, or
-non-trivial acceptance criteria:
+For a multi-deliverable or capability-sensitive task, use the current Codex
+thread's complete conversation, active Skill, repository knowledge, user policy,
+and Plan Mode state to author a structured task proposal. C4Harness does not call
+another planning model. Codex proposes semantic nodes; C4 validates the contracts
+and chooses workers from capabilities, preferences, and verified History.
+
+Do not choose a worker or model in the proposal. Describe required capabilities.
+Write a version-1 JSON proposal to a local ignored path such as
+`.cost-router/proposals/<task>.json` using this shape:
+
+```json
+{
+  "version": 1,
+  "root_goal": "<complete user objective>",
+  "requirements": [
+    {"id": "R1", "text": "<deliverable>", "kind": "deliverable", "required": true},
+    {"id": "C1", "text": "<boundary>", "kind": "constraint", "required": true}
+  ],
+  "constraints": ["<global execution or safety boundary>"],
+  "acceptance_criteria": [
+    {"id": "A1", "description": "<root completion condition>", "check": "semantic_review", "requirement_refs": ["R1"]}
+  ],
+  "interaction_mode": "execute",
+  "unresolved_questions": [],
+  "nodes": [
+    {
+      "node_id": "node-1",
+      "kind": "work",
+      "objective": "<one bounded outcome>",
+      "requirement_refs": ["R1", "C1"],
+      "dependencies": [],
+      "context_packs": [],
+      "artifact_inputs": [],
+      "allowed_paths": ["<minimum read scope>"],
+      "write_paths": [],
+      "execution_mode": "read_only",
+      "output_type": "report",
+      "hard_capabilities": {"modalities": ["text"], "tools": ["read", "grep"]},
+      "soft_capability_weights": {"debugging": 0.8, "long_context": 0.4},
+      "verifier_plan": {
+        "template_checks": ["requirement_coverage"],
+        "evidence_requirements": ["Cite inspectable repository evidence"],
+        "semantic_criteria": ["<criterion requiring harness judgment>"],
+        "root_contribution": "Satisfies R1",
+        "inconclusive_policy": "escalate"
+      },
+      "root_contribution": "Satisfies R1"
+    }
+  ]
+}
+```
+
+Valid hard fields are `modalities`, `tools`, `write_isolation`,
+`network_required`, `structured_output_required`, `min_context_tokens`,
+`persistent_session_required`, `provider_protocols`, and `privacy_zones`.
+Valid soft dimensions are `code_implementation`, `debugging`,
+`frontend_visual`, `documentation`, `architecture`, `long_context`, and
+`test_generation`, with weights from 0 to 1.
+
+Verifier template expressions are `file_exists:<path>`,
+`file_contains:<path>`, `command_exit_zero:<command>`,
+`output_matches:<regex>`, `json_schema_valid:<path>`, `tests_pass`,
+`changed_paths_within_allowlist`, `patch_non_empty`, and
+`requirement_coverage`. Patch nodes receive the two patch-safety checks
+automatically. Keep semantic criteria separate from deterministic templates.
+
+Compile and assign without calling a model or executing a worker:
 
 ```bash
 cost-router decompose \
-  --goal "<root objective>" \
-  --requirement "<required deliverable>" \
-  --constraint "<non-deliverable constraint>" \
-  --acceptance "<root acceptance condition>" \
-  --active-skill "<skill name>" \
-  --skill-step "<ordered workflow step>" \
+  --plan-file .cost-router/proposals/<task>.json \
   --repo "$PWD" \
   --json
 ```
 
-Add `--plan-mode` when the result must remain read-only. Pass only necessary
-`--path`, `--context-pack`, and `--write-path` values. Inspect the generated
-TaskSituation, root contract, graph shape, capability exclusions, assignment
-confidence, verifier plan, fallback, and security risk manifest before invoking
-any worker. This command records a plan snapshot but does not execute the graph,
-call a model, or grant external-transfer consent.
+Inspect schema/coverage errors, graph shape, hard exclusions, score breakdown,
+assignment confidence, verifier plan, and risk manifest. Revise the proposal if
+C4 rejects it. The legacy `--goal/--requirement/--skill-step` preview remains a
+fallback, but new multi-step work should use `--plan-file`. Decomposition does
+not grant external-transfer consent and does not execute the graph.
 
 ## Asynchronous Workflow
 
@@ -155,12 +213,12 @@ The Python runtime process owns scheduling, process exit, timeout, marker files,
 
 ## Current Boundaries
 
-- `cost-router decompose` previews and records a contract graph; it does not execute or schedule graph nodes.
-- The router CLI executes one worker task per invocation. The main Codex session currently performs graph scheduling.
+- `cost-router decompose` previews and records a contract graph; this command itself does not execute workers.
+- The application API now provides deterministic sequential graph scheduling, per-node delegation, contract-aware verification, History outcomes, and Root Verification. The public `run` CLI still executes one worker task per invocation; a first-class graph-run CLI remains future integration work.
 - The async runtime owns one workload per task and uses Claude only for bounded observations and terminal summaries.
 - Inbox delivery is durable. Codex currently has no public interface through which an external worker can wake the currently visible IDE conversation and confirm delivery, so C4Harness does not attempt automatic wake-up.
 - Claude CLI supports bounded patch proposals in a staged workspace. Codex subagent delegation remains read-only.
 - Patch workers edit copies, never the target repository. The main agent reviews and applies accepted patches.
-- Multiple delegated calls are not yet executed from the persisted task-contract graph.
+- Graph execution currently consumes an in-memory compiled plan with injected backend factories; restoring and executing a persisted plan snapshot is not yet a public CLI workflow.
 - Backend selection is explicit rather than learned or automatic.
 - Memory and verifier output assist orchestration but do not replace direct validation of high-impact claims.
