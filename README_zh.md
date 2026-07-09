@@ -19,8 +19,7 @@
   <img alt="存储：SQLite" src="https://img.shields.io/badge/storage-SQLite-3B82F6?logo=sqlite&logoColor=white">
 </p>
 
-一个面向成本的 coding-agent 路由器，将 Codex 主会话中边界明确的工作委托给
-更低成本或能力侧重不同的 worker。
+C4Harness 是一个面向多 coding-agent 协作的编排系统，用于从主 Codex 会话中拆解、委托、验证并沉淀受限任务，让不同成本和不同能力的 worker 在可控上下文与文件权限下协同工作。
 
 > [!IMPORTANT]
 > **C4Harness 仍处于实验阶段。** Claude CLI 委托、只读 Codex subagent、
@@ -43,6 +42,58 @@
 | 自动路由与 fallback | **计划中** | 当前仍需显式选择 backend |
 | OpenCode 与其他 harness | **计划中** | Dashboard schema 已预留，runtime adapter 尚未实现 |
 
+## 目标架构
+
+C4Harness 围绕四个核心模块组织：**Decompose**、**Delegator**、**Verifier** 和 **Memory**。主 Codex 会话保留私有编排权；C4Harness 将主会话中的结构化计划编译为受限的 worker assignment，将任务分发给不同 harness，验证 worker 返回的证据，并将可复用的执行历史沉淀为后续路由依据。
+
+![C4Harness 总体流程](assets/c4harness-overall-flow.png)
+
+整体流程可以理解为：
+
+1. **Decompose**：将 Codex 生成的结构化任务方案编译为可执行、可验证、可分配的 contract graph。
+2. **Delegator**：把已经分配好的 `TaskNodeContract` 和受限上下文交给指定 worker/harness。
+3. **Verifier**：基于文件、artifact、patch、命令输出和 verifier plan 检查 worker 结果。
+4. **Memory**：在一次任务内维护共享上下文与 artifact 图，并将验证后的 outcome 写入跨任务历史。
+
+核心不变式是：
+
+> **Workers propose → Verifier commits → Codex integrates.**
+
+### 支持的 Agent Harnesses
+
+| Harness | 角色 | 状态 |
+|---|---|---|
+| Claude Worker | analysis / patch / review | Working |
+| Codex Subagent | read-only delegated work | Working |
+| OpenCode Worker | search / summarize / alternate harness | Planned |
+| Other Harness | Aider / Roo / Custom | Research |
+
+### C4-ACD 规划流程
+
+C4-ACD 不只是简单的 prompt 拆分，而是把 Codex 的语义规划转化为一个可以执行、可以验证、可以分配 worker 的契约式任务图。
+
+![C4-ACD 规划流程](assets/c4-acd-contract-planning.png)
+
+第一版设计中，Codex 负责理解完整对话、Skill workflow、仓库上下文和用户约束，并输出结构化的 `CodexTaskProposal`。C4Harness 不额外调用一套 planning LLM，而是对 proposal 做确定性编译和分配：
+
+1. **Decomposition & Contract Preparation**：校验 proposal、检查 requirement coverage、准备 RootContract，并规范化单节点或任务图路径。
+2. **Contract Graph & Worker Assignment**：编译 `TaskNodeContract`，根据 hard capabilities 过滤 worker，再结合 soft score、用户偏好和历史证据选择主 worker 与 fallback。
+3. **Verifier Plan Design**：生成节点级 verifier plan，补充模板检查、证据要求和路径/权限约束。
+
+最终输出是 `DecompositionPlan`，包括 `RootContract`、`TaskContractGraph`、`WorkerAssignmentPlan`、`VerifierPlan`、`SecurityRiskManifest` 和 `PlanValidationReport`。Decompose 阶段只生成计划，不执行 worker，也不运行 verifier。
+
+### Memory 设计
+
+C4Harness 将一次任务内的协作 memory 和跨任务的历史证据分开管理。
+
+![Shared Task Memory with bounded worker access](assets/shared-task-memory-bounded-access.png)
+
+**Shared Task Memory** 是当前任务的 runtime context-artifact graph。它负责描述 worker 能看到什么、能读取哪些文件、能提交哪些 artifact 或 patch proposal。每个 worker 只读取被批准的 task node、context pack 和 file/artifact，不能直接写入 shared facts，也不能直接修改真实仓库文件。
+
+**Execution History** 是跨任务的 append-only 记录，用于保存 plan snapshot、verified outcome、failure attribution、token/latency 和 capability profile。它默认不对 worker 可见，只向后续 Decompose 阶段提供受控的 capability evidence summary。
+
+这种拆分让当前任务协作保持最小可见性，同时允许系统基于历史验证结果做更好的 worker assignment。
+
 ## Dashboard
 
 跨项目和 Codex 会话查看委托上下文、预估主模型节省、实际 worker Token 与
@@ -57,45 +108,6 @@ backend 分布。
 
 Dashboard 同时也是异步工作的通知界面：首页突出未读终态结果和运行中任务，
 “异步任务”页面按来源 Codex 对话分组，并允许用户将结果标记为已处理。
-
-## 目标架构
-
-![Cost-Aware Coding Router — 端到端流程与多层共享内存图](assets/router.png)
-
-系统采用三阶段流水线 — **Task Router → Delegator → Verifier** — 由 Codex 主会话编排。Worker 提出 patch 和事实；verifier 只将验证通过的结果提交到共享 memory 图中。
-
-**Harness 方向：**
-
-| Harness | 角色 | 状态 |
-|---|---|---|
-| Claude Worker | 分析 / patch / 审查 | 可用 |
-| Codex Subagent | 低成本内部 worker | 只读可用 |
-| OpenCode Worker | 搜索 / 摘要 / 替代 harness | 计划中 |
-| Other（Aider、Roo、Custom） | Adapter 扩展 | 研究中 |
-
-**任务拆解（C4-ACD）：**
-
-拆解模块（自适应契约式拆解）将经过充分理解的用户任务转化为可执行、可验证、可重规划的计划。它不是把 prompt 切成碎片，而是：
-
-1. **理解任务** — 收集最小充分上下文：用户目标、Skill workflow、仓库事实和 worker 能力。
-2. **定义完成** — 构建根契约（Root Contract），明确任务完成所需的所有证据和产物。
-3. **判断 fast/graph 路径** — 评估拆解是否真正降低风险、上下文压力或能力缺口，还是单一 worker 即可完成。
-4. **生成契约图** — 产出任务节点，每个节点包含目标、依赖、Context Pack、权限和验证计划。
-5. **分配 Worker** — 先按硬能力（模态、工具、写入隔离、权限）过滤，再按软能力、历史证据和用户偏好评分。
-6. **基于反馈重规划** — 根据结构化失败信号（缺失上下文、能力不匹配、验证失败）调整计划，同时遵守尝试次数和 Token 预算。
-
-每个节点都是一份契约：声明目标、输入、产物、能力、权限以及如何验证成功。拆解不执行 Worker、不写入共享 Memory —— 它产出的计划由 Delegator 和 Verifier 消费。
-
-**多层共享 memory 图**（4 层）：
-
-- **Main 层** — Main Private State：路由策略、私有计划、最终决策。
-- **Worker 层** — 每个 harness 一个 Task Node（Claude、Subagent、OpenCode、Other）。
-- **Context 层** — Context Pack A–D：主 agent 为每个 worker 分配的只读背景材料。
-- **File / Artifact 层** — 共享制品（repo map、build log、test report、design notes）和私有制品（scratchpad、trace、patch proposal、transcript）。
-
-依赖类型：**实线** = 跨 worker 共享，**虚线** = 单 worker 私有，**点线** = context 引用。
-
-核心不变量：**Workers propose → Verifier commits → Codex integrates。**
 
 ## 快速开始
 

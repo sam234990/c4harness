@@ -19,7 +19,7 @@
   <img alt="Storage: SQLite" src="https://img.shields.io/badge/storage-SQLite-3B82F6?logo=sqlite&logoColor=white">
 </p>
 
-A cost-aware coding-agent router for delegating bounded work from a main Codex session to lower-cost or differently specialized workers.
+A cost-aware multi-agent coding orchestration system for decomposing bounded work from a main Codex session, delegating it to specialized harnesses, verifying the results, and learning from execution history.
 
 > [!IMPORTANT]
 > **C4Harness is experimental.** Claude CLI delegation, read-only Codex
@@ -43,6 +43,59 @@ A cost-aware coding-agent router for delegating bounded work from a main Codex s
 | Automatic routing and fallback | **Planned** | Backend selection is still explicit |
 | OpenCode / other harnesses | **Planned** | Dashboard schema is ready; runtime adapter is not |
 
+## Target Architecture
+
+C4Harness is organized around four core modules: **Decompose**, **Delegator**, **Verifier**, and **Memory**. A Codex main session remains the private orchestrator. C4Harness turns the main session's structured plan into bounded worker assignments, dispatches work to supported harnesses, validates the returned evidence, and records reusable history for future routing.
+
+![C4Harness overall flow](assets/c4harness-overall-flow.png)
+
+The overall workflow is:
+
+1. **Decompose** converts a grounded user request into a contract-aware plan, including task nodes, worker requirements, verifier plans, and assignment decisions.
+2. **Delegator** sends each assigned task to the selected harness with only the approved context, file visibility, and write scope.
+3. **Verifier** checks worker results against deterministic templates, artifacts, path constraints, and root-level acceptance requirements.
+4. **Memory** maintains runtime collaboration state and cross-task capability evidence without exposing unrelated history to workers.
+
+Workers propose patches, facts, and summaries. The verifier commits only validated evidence. Codex integrates the accepted result and makes the final user-facing decision.
+
+**Harness direction:**
+
+| Harness | Role | Status |
+|---|---|---|
+| Claude Worker | analysis / patch / review | Working |
+| Codex Subagent | read-only delegated work | Working |
+| OpenCode Worker | search / summarize / alternate harness | Planned |
+| Other (Aider, Roo, Custom) | adapter-based extension | Research |
+
+### C4-ACD planning pipeline
+
+C4-ACD is the planning stage that turns a Codex semantic proposal into an executable, verifiable, and assignable contract graph. Codex uses the full conversation, skill workflow, repository context, and user constraints to emit a structured `CodexTaskProposal`. C4Harness then validates and compiles that proposal instead of calling another planning model to reinterpret the raw prompt.
+
+![C4-ACD planning pipeline](assets/c4-acd-contract-planning.png)
+
+The pipeline has three tightly connected responsibilities:
+
+- **Decomposition and contract preparation** validates the proposal, checks requirement coverage, prepares the root contract, and normalizes the plan into either a single-node path or a task graph.
+- **Contract graph and worker assignment** compiles `TaskNodeContract`s, filters workers by hard capabilities, scores soft capabilities with user preferences and history evidence, and chooses primary and fallback workers.
+- **Verifier plan design** prepares per-node verifier plans, template checks, evidence requirements, and compile-time constraints so verification is designed before execution starts.
+
+The output is a `DecompositionPlan` containing the `RootContract`, `TaskContractGraph`, `WorkerAssignmentPlan`, `VerifierPlan`s, `SecurityRiskManifest`, and `PlanValidationReport`. Decompose is preview-only: it does not execute workers, run verifiers, or write the runtime shared-memory graph.
+
+### Memory design
+
+C4Harness separates runtime collaboration memory from historical capability evidence. **Shared Task Memory** is the current task's context-artifact graph: it controls what each worker can read, which context packs it receives, and what patches or outputs it may propose. **Execution History** is a cross-task evidence store: it records plan snapshots, verified outcomes, failure attribution, token and latency usage, and derived capability profiles.
+
+![Shared Task Memory with bounded worker access](assets/shared-task-memory-bounded-access.png)
+
+This separation keeps the access boundary clear:
+
+- Workers read only approved task nodes, context packs, and file/artifact references.
+- Workers do not directly edit shared facts or real repository files; they propose outputs or patch artifacts.
+- Verifier and Codex decide which worker outputs become committed evidence.
+- History is not worker-visible by default; Decompose reads only controlled capability summaries for future assignment.
+
+Core invariant: **Workers propose → Verifier commits → Codex integrates.**
+
 ## Dashboard
 
 Track delegated context, estimated main-agent savings, actual worker usage, and
@@ -59,45 +112,6 @@ The Dashboard also acts as the notification surface for asynchronous work. Its
 overview highlights unread terminal results and running jobs; the Async Tasks
 page groups them by the originating Codex thread and lets the user mark results
 as handled.
-
-## Target Architecture
-
-![Cost-Aware Coding Router — end-to-end flow and multi-layer shared memory graph](assets/router.png)
-
-The system follows a three-stage pipeline — **Task Router → Delegator → Verifier** — orchestrated by a Codex main session. Workers propose patches and facts; the verifier commits only validated results into the shared memory graph.
-
-**Harness direction:**
-
-| Harness | Role | Status |
-|---|---|---|
-| Claude Worker | analysis / patch / review | Working |
-| Codex Subagent | lower-cost internal worker | Read-only working |
-| OpenCode Worker | search / summarize / alternate harness | Planned |
-| Other (Aider, Roo, Custom) | adapter-based extension | Research |
-
-**Task decomposition (C4-ACD):**
-
-The decomposition module (Adaptive Contract Decomposition) transforms a grounded user task into an executable, verifiable, and replannable plan. Rather than splitting a prompt into fragments, it:
-
-1. **Grounds the task** — collects minimal sufficient context: user goals, skill workflow, repository facts, and worker capabilities.
-2. **Defines completion** — constructs a Root Contract specifying what evidence or artifacts must exist for the task to be considered done.
-3. **Decides fast vs. graph path** — evaluates whether decomposition actually reduces risk, context pressure, or capability gaps, or whether a single worker suffices.
-4. **Generates a contract graph** — produces task nodes with objectives, dependencies, context packs, permissions, and per-node verifier plans.
-5. **Assigns workers** — filters by hard capabilities (modalities, tools, write isolation, permissions) then scores soft capabilities, historical evidence, and user preferences.
-6. **Replans from feedback** — adjusts the plan based on structured failure signals (missing context, capability mismatch, verification failure) while respecting attempt and token budgets.
-
-Each node is a contract: it declares goals, inputs, artifacts, capabilities, permissions, and how success will be verified. Decomposition does not execute workers or write shared memory — it produces a plan consumed by the Delegator and Verifier.
-
-**Multi-layer shared memory graph** (4 layers):
-
-- **Main layer** — Main Private State: routing policy, private plan, final decisions.
-- **Worker layer** — one Task Node per harness (Claude, Subagent, OpenCode, Other).
-- **Context layer** — Context Packs A–D: read-only background material the main agent assigns to each worker.
-- **File / Artifact layer** — shared artifacts (repo map, build log, test report, design notes) and private artifacts (scratchpad, trace, patch proposal, transcript).
-
-Dependency types: **solid** = shared across workers, **dashed** = private to one worker, **dotted** = context reference.
-
-Core invariant: **Workers propose → Verifier commits → Codex integrates.**
 
 ## Quick Start
 
