@@ -373,7 +373,7 @@ token and latency
 
 ## 当前实现与下一步
 
-当前 `cost_router run` 已经能把 worker、artifact、事件和 verifier 结果写入图结构。下一步不是继续把所有持久化都塞入这些表，而是收紧边界：
+当前 `c4harness run` 已经能把 worker、artifact、事件和 verifier 结果写入图结构。下一步不是继续把所有持久化都塞入这些表，而是收紧边界：
 
 1. `nodes/edges/worker_events/file_locks` 只表达当前任务协作图。
 2. Decompose 的 contract graph plan snapshot 迁到独立 History repository。

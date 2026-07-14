@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cost_router.core.contracts import (
+from c4harness.core.contracts import (
     Difficulty,
     RouteDecision,
     Risk,
@@ -21,16 +21,16 @@ from cost_router.core.contracts import (
     VerificationResult,
     WorkerResult,
 )
-from cost_router.delegator.runtime import (
+from c4harness.delegator.runtime import (
     DelegationRuntime,
     PreparedWorker,
 )
-from cost_router.history.contracts import (
+from c4harness.history.contracts import (
     FailureAttribution,
     OutcomeStatus,
 )
-from cost_router.history.repository import InMemoryHistoryRepository
-from cost_router.memory import MemoryStore
+from c4harness.history.repository import InMemoryHistoryRepository
+from c4harness.memory import MemoryStore
 
 
 def _task(root: Path, tid: str = "t1") -> Task:
@@ -718,7 +718,7 @@ class HistoryPersistenceTests(unittest.TestCase):
 
     def test_excluded_attributions_match_profiles(self) -> None:
         """All non-worker attributions are in the profiles exclusion set."""
-        from cost_router.history.profiles import _EXCLUDED_ATTRIBUTIONS
+        from c4harness.history.profiles import _EXCLUDED_ATTRIBUTIONS
 
         def runner_env(**_):
             raise OSError("fail")
@@ -762,7 +762,7 @@ class AttributionUnitTests(unittest.TestCase):
     """Direct unit tests for the attribution function."""
 
     def test_exception_type_classification(self) -> None:
-        from cost_router.history.attribution import _classify_exception
+        from c4harness.history.attribution import _classify_exception
 
         self.assertEqual(
             _classify_exception(PermissionError()),
@@ -794,7 +794,7 @@ class AttributionUnitTests(unittest.TestCase):
         )
 
     def test_block_reason_classification(self) -> None:
-        from cost_router.history.attribution import _classify_block_reasons
+        from c4harness.history.attribution import _classify_block_reasons
 
         self.assertEqual(
             _classify_block_reasons(["consent scope changed"]),
@@ -828,7 +828,7 @@ class AttributionUnitTests(unittest.TestCase):
         )
 
     def test_attribute_outcome_with_exception(self) -> None:
-        from cost_router.history.attribution import attribute_outcome
+        from c4harness.history.attribution import attribute_outcome
 
         result = attribute_outcome(
             task_id="t1",
@@ -842,7 +842,7 @@ class AttributionUnitTests(unittest.TestCase):
         self.assertEqual(result.failure_attribution, FailureAttribution.WORKER_ERROR)
 
     def test_attribute_outcome_no_result_no_exception(self) -> None:
-        from cost_router.history.attribution import attribute_outcome
+        from c4harness.history.attribution import attribute_outcome
 
         result = attribute_outcome(
             task_id="t1",
@@ -855,7 +855,7 @@ class AttributionUnitTests(unittest.TestCase):
         self.assertEqual(result.failure_attribution, FailureAttribution.WORKER_ERROR)
 
     def test_attribute_outcome_success(self) -> None:
-        from cost_router.history.attribution import attribute_outcome
+        from c4harness.history.attribution import attribute_outcome
 
         result = attribute_outcome(
             task_id="t1",
@@ -869,7 +869,7 @@ class AttributionUnitTests(unittest.TestCase):
         self.assertEqual(result.verification_status, "accepted")
 
     def test_attribute_outcome_extracts_tokens(self) -> None:
-        from cost_router.history.attribution import attribute_outcome
+        from c4harness.history.attribution import attribute_outcome
 
         result = attribute_outcome(
             task_id="t1",
@@ -887,7 +887,7 @@ class AttributionUnitTests(unittest.TestCase):
         self.assertEqual(result.total_tokens, 15)
 
     def test_attribute_outcome_fallback_artifacts_from_changed_paths(self) -> None:
-        from cost_router.history.attribution import attribute_outcome
+        from c4harness.history.attribution import attribute_outcome
 
         result = attribute_outcome(
             task_id="t1",
@@ -903,7 +903,7 @@ class AttributionUnitTests(unittest.TestCase):
         self.assertEqual(result.artifact_refs, ("a.py", "b.py"))
 
     def test_attribute_outcome_explicit_refs_override_changed_paths(self) -> None:
-        from cost_router.history.attribution import attribute_outcome
+        from c4harness.history.attribution import attribute_outcome
 
         result = attribute_outcome(
             task_id="t1",
@@ -920,7 +920,7 @@ class AttributionUnitTests(unittest.TestCase):
         self.assertEqual(result.artifact_refs, ("explicit.py",))
 
     def test_attribute_outcome_latency_recorded(self) -> None:
-        from cost_router.history.attribution import attribute_outcome
+        from c4harness.history.attribution import attribute_outcome
 
         result = attribute_outcome(
             task_id="t1",
@@ -933,7 +933,7 @@ class AttributionUnitTests(unittest.TestCase):
         self.assertEqual(result.latency_ms, 42)
 
     def test_attribute_outcome_capability_dimensions_recorded(self) -> None:
-        from cost_router.history.attribution import attribute_outcome
+        from c4harness.history.attribution import attribute_outcome
 
         result = attribute_outcome(
             task_id="t1",

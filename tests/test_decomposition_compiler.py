@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cost_router.decompose import (
+from c4harness.decompose import (
     ExecutionMode,
     ExecutionShape,
     InteractionMode,
@@ -16,8 +16,8 @@ from cost_router.decompose import (
     WorkerCapabilities,
     WorkerRegistry,
 )
-from cost_router.decompose.compiler import ProposalCompileError, compile_proposal
-from cost_router.decompose.proposal import (
+from c4harness.decompose.compiler import ProposalCompileError, compile_proposal
+from c4harness.decompose.proposal import (
     CodexTaskProposal,
     ProposalAcceptanceCriterion,
     ProposalNode,

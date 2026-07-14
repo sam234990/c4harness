@@ -9,15 +9,15 @@ import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from cost_router.config.workers import WorkerManifestStore
-from cost_router.dashboard.server import _handler
-from cost_router.memory import MemoryStore
-from cost_router.usage.aggregation import AnalyticsStore
+from c4harness.config.workers import WorkerManifestStore
+from c4harness.dashboard.server import _handler
+from c4harness.memory import MemoryStore
+from c4harness.usage.aggregation import AnalyticsStore
 
 
 class WorkerDashboardTests(unittest.TestCase):
     def test_worker_page_has_visible_save_feedback(self) -> None:
-        root = Path(__file__).resolve().parents[1] / "cost_router" / "web"
+        root = Path(__file__).resolve().parents[1] / "c4harness" / "web"
         html = (root / "index.html").read_text(encoding="utf-8")
         javascript = (root / "app.js").read_text(encoding="utf-8")
         self.assertIn('id="workers-save-status"', html)

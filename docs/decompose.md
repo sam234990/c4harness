@@ -436,7 +436,7 @@ Delegator/Verifier 产生结构化 failure
 
 - 在 bundled Skill 中提供稳定的 `CodexTaskProposal` 模板和 capability dimension 说明。
 - Codex 使用已有对话、Skill 和仓库上下文生成结构化 JSON。
-- `cost-router decompose --plan-file <json>` 读取提案；不调用任何额外 LLM API。
+- `c4harness decompose --plan-file <json>` 读取提案；不调用任何额外 LLM API。
 - 校验 requirement、constraint、acceptance、dependency、path 和 Plan Mode。
 - 单节点/多节点图规范化，不从自然语言重新拆任务。
 - 编译 TaskNodeContract、RootContract 和 VerifierPlan。
@@ -459,7 +459,7 @@ Delegator/Verifier 产生结构化 failure
 
 ### 4.3 当前代码状态与迁移
 
-当前 `cost_router decompose` 已实现本文目标中的 `--plan-file` 主入口，包括严格 Proposal parser、Contract Graph compiler、VerifierPlan 模板校验、现有 Worker assignment 与 History plan snapshot。旧 CLI 参数仍可构造 TaskSituation，并使用规则操作符从 requirement 或 Skill steps 生成节点；现有规则 planner 保留为：
+当前 `c4harness decompose` 已实现本文目标中的 `--plan-file` 主入口，包括严格 Proposal parser、Contract Graph compiler、VerifierPlan 模板校验、现有 Worker assignment 与 History plan snapshot。旧 CLI 参数仍可构造 TaskSituation，并使用规则操作符从 requirement 或 Skill steps 生成节点；现有规则 planner 保留为：
 
 - 旧 CLI 的兼容路径。
 - 缺少结构化计划时的单节点 fallback。

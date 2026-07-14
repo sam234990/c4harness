@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cost_router.decompose.verifier_templates import (
+from c4harness.decompose.verifier_templates import (
     PATCH_ONLY_TEMPLATES,
     TemplateCheckSpec,
     TemplateKind,

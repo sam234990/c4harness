@@ -13,13 +13,13 @@ import time
 import unittest
 from contextlib import redirect_stdout
 
-from cost_router.delegator.async_runtime import (
+from c4harness.delegator.async_runtime import (
     AsyncTaskConfig,
     AsyncTaskRuntime,
     AsyncTaskStore,
     _next_backoff_interval,
 )
-from cost_router.cli import main
+from c4harness.cli import main
 
 
 def executable(path: Path, body: str) -> Path:

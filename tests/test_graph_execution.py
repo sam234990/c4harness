@@ -7,8 +7,8 @@ import unittest
 import json
 from pathlib import Path
 
-from cost_router.application import GraphExecutionService
-from cost_router.core.contracts import (
+from c4harness.application import GraphExecutionService
+from c4harness.core.contracts import (
     Difficulty,
     Evidence,
     Risk,
@@ -16,7 +16,7 @@ from cost_router.core.contracts import (
     Task,
     WorkerResult,
 )
-from cost_router.core.graph import (
+from c4harness.core.graph import (
     AcceptanceCriterion,
     DecompositionPlan,
     ExecutionShape,
@@ -29,9 +29,9 @@ from cost_router.core.graph import (
     TaskSituation,
     VerificationContract,
 )
-from cost_router.delegator import DelegationRuntime, NodeState, PreparedWorker
-from cost_router.history import InMemoryHistoryRepository
-from cost_router.memory import MemoryStore
+from c4harness.delegator import DelegationRuntime, NodeState, PreparedWorker
+from c4harness.history import InMemoryHistoryRepository
+from c4harness.memory import MemoryStore
 
 
 def _plan(repo: Path) -> DecompositionPlan:
@@ -159,7 +159,9 @@ class GraphExecutionIntegrationTests(unittest.TestCase):
             self.assertFalse(report.accepted)
             self.assertEqual(report.graph_result.node_outcomes["inspect"].state, NodeState.FAILED)
             self.assertEqual(report.graph_result.node_outcomes["confirm"].state, NodeState.BLOCKED)
-            self.assertEqual(len(history.outcomes), 1)
+        # Default graph nodes receive one initial attempt plus one bounded
+        # retry/fallback attempt.
+        self.assertEqual(len(history.outcomes), 2)
 
     def test_dry_run_does_not_delegate_or_write_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

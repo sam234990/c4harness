@@ -4,6 +4,8 @@
 
 # Local test artifacts
 .codex-test/
+.c4harness/
+# Legacy local backup; new code does not read it.
 .cost-router/
 tmp/
 tmp.txt
@@ -20,7 +22,7 @@ test/
 experiments/
 outputs/
 skills/*
-!skills/cost-router/
+!skills/c4harness/
 background/
 
 # OS

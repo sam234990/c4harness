@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from cost_router.decompose.proposal import (
+from c4harness.decompose.proposal import (
     CodexTaskProposal,
     ProposalAcceptanceCriterion,
     ProposalNode,
@@ -13,7 +13,7 @@ from cost_router.decompose.proposal import (
     ProposalRequirement,
     VerifierPlan,
 )
-from cost_router.decompose.models import (
+from c4harness.decompose.models import (
     ExecutionMode,
     InteractionMode,
     NodeKind,

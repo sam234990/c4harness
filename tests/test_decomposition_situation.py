@@ -4,13 +4,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cost_router.core.contracts import (
+from c4harness.core.contracts import (
     DataClassification,
     ExternalPolicy,
     Task,
     TaskConstraints,
 )
-from cost_router.decompose import (
+from c4harness.decompose import (
     AcceptanceCriterion,
     InteractionMode,
     Requirement,

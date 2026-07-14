@@ -4,9 +4,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cost_router.application import PrepareTask
-from cost_router.core.contracts import Task
-from cost_router.decompose import (
+from c4harness.application import PrepareTask
+from c4harness.core.contracts import Task
+from c4harness.decompose import (
     BoundedReplanner,
     DecompositionService,
     ReplanAction,
@@ -16,14 +16,14 @@ from cost_router.decompose import (
     WorkerCapabilities,
     WorkerRegistry,
 )
-from cost_router.history import (
+from c4harness.history import (
     ExecutionOutcome,
     FailureAttribution,
     InMemoryHistoryRepository,
     OutcomeStatus,
     build_capability_profile,
 )
-from cost_router.memory import MemoryStore
+from c4harness.memory import MemoryStore
 
 
 class ArchitectureBoundaryTests(unittest.TestCase):

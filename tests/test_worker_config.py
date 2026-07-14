@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cost_router.config.workers import WorkerManifestStore, builtin_workers
+from c4harness.config.workers import WorkerManifestStore, builtin_workers
 
 
 class WorkerManifestTests(unittest.TestCase):

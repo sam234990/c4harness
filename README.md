@@ -26,8 +26,11 @@ A cost-aware multi-agent coding orchestration system for decomposing bounded wor
 > subagents, bounded patch proposals, shared-memory persistence, and the local
 > dashboard work today. Generic asynchronous workloads can also be monitored by
 > a resumable Claude session; significant and terminal events are stored in the
-> durable C4 Inbox and surfaced by the Dashboard. Explainable decomposition preview is now available; graph execution,
-> automatic scheduling, and fallback remain roadmap items.
+> durable C4 Inbox and surfaced by the Dashboard. Explainable decomposition and
+> public `graph-run` CLI now executes compiled plans with dependency-aware,
+> bounded parallelism, structured verification failures, and at most two
+> attempts per node. Automatic capability learning and broader harness support
+> remain roadmap items.
 
 ## Project Status
 
@@ -40,7 +43,13 @@ A cost-aware multi-agent coding orchestration system for decomposing bounded wor
 | Shared memory graph | **Prototype** | Control, worker, context, artifact, event, and lock records |
 | Async worker runtime | **Prototype** | Detached workload, resumable Claude checks, durable Inbox notifications |
 | Task decomposition | **Prototype** | Contract graph preview, capability assignment, confidence, risk, and history snapshot |
-| Automatic routing and fallback | **Planned** | Backend selection is still explicit |
+| Graph runtime | **Prototype** | Public `graph-run`, dependency scheduling, bounded parallel batches, node verification, History outcomes, and root verification |
+| Graph-scoped integration workspace | **Prototype** | Git-independent snapshot, transactional patch apply/verify/commit, shared canonical workspace per task graph |
+| Structured verifier phases | **Prototype** | Proposal-phase and post-integration-phase checks with structured failure classification |
+| Retry and fallback execution | **Prototype** | At most two total attempts; retryable failures use the same worker or next eligible fallback; env/policy/conflict failures do not retry |
+| Graph-run CLI | **Working** | Compiles a version-1 proposal and executes its assigned graph; dry-run is the default |
+| Bounded parallel execution | **Prototype** | Independent ready nodes run concurrently; overlapping write sets serialize; integration stays isolated from the source repo |
+| Capability-based graph routing | **Prototype** | Compiled assignments and eligible fallback workers drive graph execution; single-task `run` remains explicit |
 | OpenCode / other harnesses | **Planned** | Dashboard schema is ready; runtime adapter is not |
 
 ## Target Architecture
@@ -126,12 +135,12 @@ as handled.
 git clone https://github.com/sam234990/c4harness.git
 cd c4harness
 python3 -m pip install -e .
-cost-router setup
+c4harness setup
 ```
 
-`setup` creates the personal ledger at `$XDG_DATA_HOME/cost-router/memory.sqlite3`
-(or `~/.local/share/cost-router/memory.sqlite3`) and installs the skill at
-`$HOME/.agents/skills/cost-router`. It prints the exact writable root to add to
+`setup` creates the personal ledger at `$XDG_DATA_HOME/c4harness/memory.sqlite3`
+(or `~/.local/share/c4harness/memory.sqlite3`) and installs the skill at
+`$HOME/.agents/skills/c4harness`. It prints the exact writable root to add to
 `~/.codex/config.toml`; add it and restart Codex so every project can write to
 the shared ledger without repeated approval prompts.
 
@@ -153,11 +162,11 @@ claude auth status
 ### Personal Codex skill
 
 ```bash
-cost-router setup
+c4harness setup
 ```
 
 This is a user-level registration, so the skill is available from every Codex
-session and project. Existing installations are kept; run `cost-router setup
+session and project. Existing installations are kept; run `c4harness setup
 --force` to update the installed copy.
 
 ### Use in Codex
@@ -165,7 +174,7 @@ session and project. Existing installations are kept; run `cost-router setup
 Restart Codex, verify the skill appears in `/skills`, then use it directly in a Codex chat:
 
 ```text
-$cost-router Investigate this long coding task, delegate suitable exploratory work, then implement and verify the result.
+$c4harness Investigate this long coding task, delegate suitable exploratory work, then implement and verify the result.
 ```
 
 Codex may also select the skill implicitly for decomposable, context-heavy coding work. Explicit invocation is preferable while the workflow is being tested.
@@ -226,7 +235,7 @@ capability-aware worker assignments, verifier plans, and security-risk manifests
 It is preview-only: no worker or task graph is executed.
 
 ```bash
-cost-router decompose \
+c4harness decompose \
   --goal "review and document the parser" \
   --requirement "inspect parser behavior" \
   --requirement "produce evidence-backed documentation" \
@@ -241,8 +250,8 @@ cost-router decompose \
 
 Plans and node outcomes use the separate decomposition-history repository; they
 are not mixed into the per-task shared context/artifact memory graph. Worker
-capabilities are loaded from `~/.config/cost-router/workers.json` (or
-`COST_ROUTER_WORKERS`). The same manifest can be edited on the Dashboard's
+capabilities are loaded from `~/.config/c4harness/workers.json` (or
+`C4HARNESS_WORKERS`). The same manifest can be edited on the Dashboard's
 **Worker Configuration** page.
 
 Each Worker keeps the actual upstream model separate from the CLI alias used by
@@ -252,17 +261,48 @@ its harness. For example, a Claude Code configuration may declare
 to select the custom model. Execute a configured entry with:
 
 ```bash
-cost-router run --worker-id claude-mimo-pro --goal "review this module" --path src/ --json
+c4harness run --worker-id claude-mimo-pro --goal "review this module" --path src/ --json
 ```
 
 The Worker editor presents hard capabilities as checkboxes, switches, selects,
 and context limits, while soft capabilities use 0–1 sliders. Backend/adapter is
 derived from the selected Harness instead of being a duplicate user setting.
 
+### Execute a task graph
+
+`graph-run` compiles the same version-1 proposal as `decompose`, then executes
+the assigned nodes. It defaults to a safe preview and does not invoke a worker
+unless `--execute` is present.
+
+```bash
+# Preview dependency order, assignments, and graph shape.
+c4harness graph-run \
+  --plan-file .c4harness/proposals/task.json \
+  --repo "$PWD" \
+  --max-parallel 2 \
+  --json
+
+# Execute after reviewing risk manifests and external-transfer consent.
+c4harness graph-run \
+  --plan-file .c4harness/proposals/task.json \
+  --repo "$PWD" \
+  --max-parallel 2 \
+  --external-policy allow \
+  --data-classification private \
+  --execute \
+  --json
+```
+
+`max-parallel=1` is the conservative default. Ready nodes may share a batch
+only after dependencies succeed and only when declared write sets do not
+overlap. Worker calls can overlap, while patch integration, post-integration
+verification, and commit use short serialized transactions in the graph
+workspace. The source repository is never modified automatically.
+
 ### Open the dashboard
 
 ```bash
-cost-router dashboard
+c4harness dashboard
 ```
 
 The local console opens at `http://127.0.0.1:8765`. It summarizes calls and
@@ -271,7 +311,7 @@ filterable call log. Use `--no-open` to start without opening a browser or
 `--port PORT` to select another port.
 
 For a remote development server, prefer IDE/SSH port forwarding. To expose the
-console on the server network explicitly, use `cost-router dashboard --host
+console on the server network explicitly, use `c4harness dashboard --host
 0.0.0.0`; the dashboard has no authentication, so do not expose it to an
 untrusted network.
 
@@ -284,7 +324,7 @@ The Python CLI is for development, testing, and debugging. In normal use, invoke
 Generate the route decision without invoking any backend:
 
 ```bash
-python3 -m cost_router run \
+python3 -m c4harness run \
   --env-file /path/to/provider.env \
   --goal "analyze synthetic SkillOpt failure log" \
   --path experiments/sample-skillopt-run.log \
@@ -302,7 +342,7 @@ QWEN_CHAT_API_KEY=...
 Claude CLI dry-run:
 
 ```bash
-python3 -m cost_router run \
+python3 -m c4harness run \
   --backend claude-cli \
   --claude-model sonnet \
   --goal "analyze synthetic SkillOpt failure log" \
@@ -313,21 +353,21 @@ python3 -m cost_router run \
 With a context pack:
 
 ```bash
-python3 -m cost_router run \
+python3 -m c4harness run \
   --backend claude-cli \
   --claude-model sonnet \
   --external-policy allow \
   --data-classification private \
   --goal "review the implementation against the memory design" \
   --context-pack docs/memory.md \
-  --path cost_router/memory.py \
+  --path c4harness/memory.py \
   --execute
 ```
 
 ### Execute
 
 ```bash
-python3 -m cost_router run \
+python3 -m c4harness run \
   --env-file /path/to/provider.env \
   --goal "analyze synthetic SkillOpt failure log" \
   --path experiments/sample-skillopt-run.log \
@@ -337,7 +377,7 @@ python3 -m cost_router run \
 Claude CLI execution uses `claude -p --output-format json` by default:
 
 ```bash
-python3 -m cost_router run \
+python3 -m c4harness run \
   --backend claude-cli \
   --claude-command claude \
   --data-classification synthetic \
@@ -355,7 +395,7 @@ session when those logs change, and persist significant or terminal events in a
 durable Codex Inbox.
 
 ```bash
-cost-router async-task start \
+c4harness async-task start \
   --external-policy allow \
   --data-classification private \
   --goal "Monitor this long job and return actionable failures or completion" \
@@ -372,11 +412,11 @@ logs do not call Claude, and repeated idle checks use bounded exponential
 backoff.
 
 ```bash
-cost-router async-task status async_123456789abc
-cost-router async-task events async_123456789abc
-cost-router async-task inbox --unread-only
-cost-router async-task ack 42
-cost-router async-task stop async_123456789abc
+c4harness async-task status async_123456789abc
+c4harness async-task events async_123456789abc
+c4harness async-task inbox --unread-only
+c4harness async-task ack 42
+c4harness async-task stop async_123456789abc
 ```
 
 Codex currently exposes no public interface that lets an external worker wake
@@ -394,7 +434,7 @@ Claude analyzes snapshots but cannot override those facts.
 Use patch mode when a worker may edit a small, explicit file set:
 
 ```bash
-cost-router run \
+c4harness run \
   --backend claude-cli \
   --external-policy allow \
   --data-classification private \
@@ -402,26 +442,26 @@ cost-router run \
   --parent-task-label "Router validation improvements" \
   --goal "add validation for empty task goals" \
   --repo . \
-  --path cost_router/schemas.py \
-  --write-path cost_router/router.py \
+  --path c4harness/schemas.py \
+  --write-path c4harness/router.py \
   --write-path tests/test_core.py \
   --execute \
   --json
 ```
 
-`--path` inputs are read-only. `--write-path` entries form the complete write allowlist. The worker receives `Edit/Write` tools only inside that run. Cost Router compares the workspace with its baseline, rejects out-of-scope changes, and emits `proposed.patch`; it never applies the patch automatically.
+`--path` inputs are read-only. `--write-path` entries form the complete write allowlist. The worker receives `Edit/Write` tools only inside that run. C4Harness compares the workspace with its baseline, rejects out-of-scope changes, and emits `proposed.patch`; it never applies the patch automatically.
 
 ### Inspect Memory
 
 Route decisions, subtask results, verification status, and verified facts are stored in the personal SQLite ledger:
 
 ```bash
-python3 -m cost_router memory --json
+python3 -m c4harness memory --json
 ```
 
-All commands use the global ledger by default. Set `COST_ROUTER_MEMORY` or use
+All commands use the global ledger by default. Set `C4HARNESS_MEMORY` or use
 `--memory /path/to/memory.sqlite3` to inspect a specific ledger, including a
-legacy project ledger such as `.cost-router/memory.sqlite3`.
+project-local ledger such as `.c4harness/memory.sqlite3`.
 
 ## Token Ledger
 
@@ -448,9 +488,11 @@ Estimates use file byte size / 4 as a rough token proxy. Very small tasks may re
 **Router and orchestration**
 
 - [x] Preview and persist an explainable task-contract graph without executing it.
-- [ ] Add dependency-aware parallel and sequential worker scheduling.
-- [ ] Route by task difficulty, risk, context size, model capability, and policy.
-- [ ] Add retry budgets, fallback chains, and Inbox retention/attention policies.
+- [x] Execute a task-contract graph sequentially with dependency-aware blocking, node verification, History outcomes, and root verification.
+- [x] Add a public proposal graph runner and bounded parallel execution for independent ready nodes.
+- [ ] Connect capability, preference, History, context-size, risk, and policy scoring to automatic runtime Worker selection.
+- [x] Connect structured verifier failures to a two-attempt retry budget, fallback chain, and bounded replanning decisions.
+- [ ] Define Inbox retention and attention policies.
 
 **Shared memory and files**
 
@@ -461,9 +503,10 @@ Estimates use file byte size / 4 as a rough token proxy. Very small tasks may re
 
 **Verification and safety**
 
+- [x] Add deterministic contract-aware node verification and root-contract verification.
+- [x] Add explainable assignment confidence from capability match, History evidence, verifier availability, and candidate margin.
 - [ ] Add pluggable test, lint, type-check, and patch-applicability verifiers.
-- [ ] Introduce confidence scoring and verifier-driven rework loops.
-- [ ] Add authenticated remote dashboard access and privacy controls.
+- [x] Add verifier-driven rework and escalation loops.
 
 **Harness ecosystem**
 
@@ -471,5 +514,4 @@ Estimates use file byte size / 4 as a rough token proxy. Very small tasks may re
 - [ ] Separate declared model capabilities from capabilities actually delivered by the harness and C4 policy, then verify them with safe probes.
 - [ ] Implement the OpenCode adapter and cross-harness context contract.
 - [ ] Add writable Codex subagents with the same bounded-patch policy.
-- [ ] Define an adapter SDK for Aider, Roo, custom CLIs, and MCP delegators.
 - [ ] Package the project as a versioned Codex plugin for easier distribution.

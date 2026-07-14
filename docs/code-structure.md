@@ -32,9 +32,9 @@ c4harness/
 ├── pyproject.toml                         # package metadata and CLI entry point
 ├── README.md                              # English quick start and project overview
 ├── README_zh.md                           # Chinese quick start and project overview
-├── cost_router/                           # Python package; public name may later migrate to c4harness
+├── c4harness/                           # Python package and public import namespace
 │   ├── __init__.py
-│   ├── __main__.py                        # python -m cost_router entry
+│   ├── __main__.py                        # python -m c4harness entry
 │   │
 │   ├── core/                              # stable contracts shared across modules
 │   │   ├── __init__.py
@@ -84,12 +84,19 @@ c4harness/
 │   │   ├── structural.py                  # output/schema/artifact checks
 │   │   ├── policy.py                      # path, permission, sandbox and secret checks
 │   │   ├── grounding.py                   # evidence-to-source consistency checks
-│   │   ├── executable.py                  # patch apply, syntax, lint, test and build checks
+│   │   ├── executable.py                  # file, command, syntax, lint, test and build checks
+│   │   ├── phases.py                      # proposal/post-integration phase verification
 │   │   ├── semantic.py                    # optional model-assisted semantic review
-│   │   ├── integration.py                 # cross-node consistency and patch conflicts
 │   │   ├── root.py                        # Requirement Ledger and Root Contract verifier
 │   │   ├── attribution.py                 # failure attribution classification
 │   │   └── service.py                     # verifier module facade
+│   │
+│   ├── integrator/                        # graph-scoped patch integration boundary
+│   │   ├── __init__.py
+│   │   ├── workspace.py                   # Git-independent source snapshot
+│   │   ├── patches.py                     # transactional unified-diff application
+│   │   ├── conflicts.py                   # source drift and write-set conflicts
+│   │   └── service.py                     # graph integration session facade
 │   │
 │   ├── delegator/                         # worker execution and harness adaptation
 │   │   ├── __init__.py
@@ -211,7 +218,7 @@ c4harness/
 │
 ├── test/                                  # ignored local scratch scripts/notebooks
 ├── outputs/                               # ignored generated research outputs
-└── .cost-router/                          # ignored per-project runtime staging artifacts
+└── .c4harness/                          # ignored per-project runtime staging artifacts
 ```
 
 ## 3. 模块职责
@@ -341,7 +348,7 @@ Decompose Verifier Delegator  Memory
 
 这里需要区分三类概念：
 
-- **C4 CLI**：用户运行的 `cost-router run/decompose/dashboard/...`，位于 `cli/`。
+- **C4 CLI**：用户运行的 `c4harness run/decompose/dashboard/...`，位于 `cli/`。
 - **Harness backend**：C4 用来执行 worker 的 Codex、Claude CLI、OpenCode，位于 `delegator/backends/`。
 - **Model provider**：backend 进一步连接的 OpenAI Responses、Anthropic 或兼容 API，由 `config/providers.py` 描述。
 
@@ -387,10 +394,21 @@ Dashboard 只展示和筛选，不直接修改历史 outcome。用户偏好和 f
 **2026-07-07 新增边界**：
 
 - `history/` 已建立 contracts、SQLite repository、outcome attribution 和 capability profile；旧 `MemoryStore.record_decomposition()` 仅作为兼容桥保留。
-- `application/` 已建立 `PrepareTask`、`RunNode`、顺序 `RunGraph`、`GraphExecutionService` 与 `verify_root` use case。
+- `application/` 已建立 `PrepareTask`、`RunNode`、支持受限并行的 `RunGraph`、`GraphExecutionService` 与 `verify_root` use case。
 - `decompose/assignment.py` 与 `decompose/replan.py` 已建立，assignment 已接入现有 planner。
-- `delegator/scheduler.py` 已实现依赖驱动的顺序 ready-frontier、失败阻断和终态结果。
+- `delegator/scheduler.py` 已实现依赖驱动的 ready-frontier、写集合冲突过滤、失败阻断和终态结果。
 - `verifier/executable.py` 与 `verifier/root.py` 已实现第一版 contract-aware 和 Root Verification。
+
+**2026-07-14 Integration 与分阶段验证边界**：
+
+- `integrator/` 已成为独立模块，不依赖 Git：对普通目录创建 graph-scoped integration snapshot，并在临时事务副本中应用 unified diff。
+- 一个任务图共享同一 canonical integration workspace；前序节点验证并提交后，后继节点读取该更新版本，真实仓库在整个图执行期间保持不变。
+- `WriteReservationManager` 使用节点生命周期保留而不是 TTL；父子路径视为冲突，节点终态时确定性释放。当前实现仅承诺单个 `graph-run` 进程内的线程安全：Worker 子进程可以并行，写集合重叠的节点会被串行化，patch integration 事务也会短暂串行化。它不是跨进程 durable lease；多个 `graph-run` 进程不得共享同一个 integration workspace。
+- patch 在 integration workspace 中采用 `apply → post-integration verify → commit/rollback`，失败重试不会看到上次失败尝试的残留。
+- `verifier/phases.py` 将 proposal verification 与 post-integration verification 分离；前者检查 patch/权限/覆盖，后者才执行文件、命令、测试、输出和证据检查。
+- `decompose/replan.py` 提供有界的 same-worker retry、fallback worker、请求授权、升级或停止决策；默认最多执行两次。环境、策略和 integration conflict 不计入 worker 负面能力历史。
+- `application/run_graph.py` 已接入上述流程；公开入口为 `c4harness graph-run`，默认 dry-run，使用 `--execute --max-parallel N` 启用真实的依赖感知受限并行。
+- Verifier 已输出稳定的失败分类、代码、检查阶段、可重试性与归因；`ADD_CONTEXT` 和 `REVISE_CONTRACT` 仍是未来的动态图修改能力，首版会明确升级给主 Agent，而不会假装已自动执行。
 
 ## 8. 建议重构顺序
 
@@ -453,12 +471,13 @@ Dashboard 只展示和筛选，不直接修改历史 outcome。用户偏好和 f
 
 **当前主要结构**：
 ```
-cost_router/
+c4harness/
 ├── core/
 ├── decompose/
 ├── memory/
 ├── history/
 ├── verifier/
+├── integrator/
 ├── delegator/
 ├── application/
 ├── usage/
@@ -470,4 +489,4 @@ cost_router/
 └── compatibility modules
 ```
 
-尚未完成的结构主要包括 CLI commands 进一步细分、Memory 内部 schema/query 的细粒度拆分、并行 graph scheduler、复杂 artifact ownership/merge 和 MCP integration。当前 `MemoryStore.record_decomposition()` 仍把 plan 写入 Shared Memory nodes，这是明确标注的 legacy bridge；在 Dashboard/旧账本兼容迁移完成前不直接删除。
+尚未完成的结构主要包括 CLI commands 进一步细分、Memory 内部 schema/query 的细粒度拆分、公开 run-graph CLI、并行 graph scheduler、复杂的多 patch merge policy 和 MCP integration。文件依赖与顺序 graph execution 已有安全 integration workspace；并行执行仍需在 write reservation 与 merge policy 之上单独实现。当前 `MemoryStore.record_decomposition()` 仍把 plan 写入 Shared Memory nodes，这是明确标注的 legacy bridge；在 Dashboard/旧账本兼容迁移完成前不直接删除。

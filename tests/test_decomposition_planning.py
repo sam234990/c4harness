@@ -4,14 +4,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cost_router.core.contracts import Task
-from cost_router.decompose import (
+from c4harness.core.contracts import Task
+from c4harness.decompose import (
     Requirement,
     RequirementKind,
     TaskSituationBuilder,
 )
-from cost_router.decompose.atomicity import assess_shape
-from cost_router.decompose.operators import (
+from c4harness.decompose.atomicity import assess_shape
+from c4harness.decompose.operators import (
     deliverable_split,
     evidence_split,
     workflow_split,

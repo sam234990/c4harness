@@ -13,16 +13,18 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cost_router.core.contracts import (
+from c4harness.core.contracts import (
     Evidence,
+    FailureCategory,
+    FailureRecord,
     Task,
     TaskConstraints,
     TaskMode,
     VerificationResult,
     WorkerResult,
 )
-from cost_router.core.graph import VerificationContract
-from cost_router.verifier.executable import (
+from c4harness.core.graph import VerificationContract
+from c4harness.verifier.executable import (
     _safe_resolve,
     execute_checks,
     run_changed_paths_within_allowlist,
@@ -35,7 +37,7 @@ from cost_router.verifier.executable import (
     run_requirement_coverage,
     run_tests_pass,
 )
-from cost_router.verifier.service import verify_node, verify_worker_result
+from c4harness.verifier.service import verify_node, verify_worker_result
 
 
 def _worker_result(
@@ -595,7 +597,7 @@ class TestPathSafety(unittest.TestCase):
 
     def test_traversal_in_template_check_fails(self) -> None:
         """Template checks with traversal paths are rejected at parse time."""
-        from cost_router.decompose.verifier_templates import (
+        from c4harness.decompose.verifier_templates import (
             TemplateValidationError,
             parse_template_check,
         )
@@ -618,7 +620,7 @@ class TestTimeoutBound(unittest.TestCase):
 
     def test_max_timeout_is_bounded(self) -> None:
         """Even if caller passes a huge timeout, it's capped."""
-        from cost_router.verifier.executable import MAX_SUBPROCESS_TIMEOUT_SEC
+        from c4harness.verifier.executable import MAX_SUBPROCESS_TIMEOUT_SEC
         with tempfile.TemporaryDirectory() as tmp:
             spec = type("S", (), {"argument": "echo ok"})()
             cr = run_command_exit_zero(
@@ -864,7 +866,7 @@ class TestVerifyNode(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             (repo / "main.py").write_text("x")
-            from cost_router.core.graph import (
+            from c4harness.core.graph import (
                 ExecutionMode,
                 NodeKind,
                 TaskNodeContract,
@@ -885,7 +887,7 @@ class TestVerifyNode(unittest.TestCase):
     def test_rejected_when_check_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
-            from cost_router.core.graph import (
+            from c4harness.core.graph import (
                 ExecutionMode,
                 NodeKind,
                 TaskNodeContract,
@@ -907,7 +909,7 @@ class TestVerifyNode(unittest.TestCase):
             repo = Path(tmp)
             patch_file = Path(tmp) / "patch.diff"
             patch_file.write_text("--- a/x\n+++ b/x\n@@ -1 +1 @@\n+new\n")
-            from cost_router.core.graph import (
+            from c4harness.core.graph import (
                 ExecutionMode,
                 NodeKind,
                 TaskNodeContract,
@@ -931,7 +933,7 @@ class TestVerifyNode(unittest.TestCase):
     def test_semantic_check_yields_inconclusive(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
-            from cost_router.core.graph import (
+            from c4harness.core.graph import (
                 ExecutionMode,
                 NodeKind,
                 TaskNodeContract,
@@ -953,7 +955,7 @@ class TestVerifyNode(unittest.TestCase):
     def test_return_type_is_verification_result(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
-            from cost_router.core.graph import (
+            from c4harness.core.graph import (
                 ExecutionMode,
                 NodeKind,
                 TaskNodeContract,
@@ -1125,6 +1127,147 @@ class TestExecuteChecksRequirementCoverage(unittest.TestCase):
             )
             self.assertFalse(vr.accepted)
             self.assertIn("r2", vr.issues[0])
+
+
+# ---------------------------------------------------------------------------
+# Structured failure classification and serialization
+# ---------------------------------------------------------------------------
+
+
+class TestFailureRecordSerialization(unittest.TestCase):
+    def test_failure_record_to_dict(self) -> None:
+        rec = FailureRecord(
+            category=FailureCategory.WORKER,
+            code="failed:tests_pass",
+            message="tests failed (exit 1): pytest",
+            phase_or_check="tests_pass",
+            retryable=True,
+            blame="worker",
+        )
+        d = rec.to_dict()
+        self.assertEqual(d["category"], "worker")
+        self.assertEqual(d["code"], "failed:tests_pass")
+        self.assertEqual(d["message"], "tests failed (exit 1): pytest")
+        self.assertEqual(d["phase_or_check"], "tests_pass")
+        self.assertTrue(d["retryable"])
+        self.assertEqual(d["blame"], "worker")
+
+    def test_failure_category_values_stable(self) -> None:
+        expected = {
+            "worker", "missing_context", "contract", "policy_permission",
+            "environment", "integration_conflict", "deterministic_rejection",
+            "semantic_inconclusive",
+        }
+        actual = {c.value for c in FailureCategory}
+        self.assertEqual(actual, expected)
+
+
+class TestVerificationResultFailuresSerialization(unittest.TestCase):
+    def test_to_dict_includes_failures(self) -> None:
+        rec = FailureRecord(
+            category=FailureCategory.DETERMINISTIC_REJECTION,
+            code="failed:file_exists",
+            message="file does not exist: missing.py",
+            phase_or_check="file_exists",
+            retryable=False,
+            blame="deterministic_rejection",
+        )
+        vr = VerificationResult(
+            accepted=False,
+            confidence="low",
+            issues=["[rejected] file_exists: file does not exist: missing.py"],
+            failures=[rec],
+        )
+        d = vr.to_dict()
+        self.assertIn("failures", d)
+        self.assertEqual(len(d["failures"]), 1)
+        self.assertEqual(d["failures"][0]["category"], "deterministic_rejection")
+        self.assertEqual(d["failures"][0]["code"], "failed:file_exists")
+
+    def test_to_dict_failures_empty_when_accepted(self) -> None:
+        vr = VerificationResult(accepted=True, confidence="high")
+        d = vr.to_dict()
+        self.assertEqual(d["failures"], [])
+
+    def test_legacy_constructor_still_works(self) -> None:
+        """Legacy positional constructor without failures still works."""
+        vr = VerificationResult(True, "medium", ["issue1"], ["fact1"])
+        self.assertTrue(vr.accepted)
+        self.assertEqual(vr.confidence, "medium")
+        self.assertEqual(vr.issues, ["issue1"])
+        self.assertEqual(vr.memory_facts, ["fact1"])
+        self.assertEqual(vr.failures, [])
+
+
+class TestExecuteChecksStructuredFailures(unittest.TestCase):
+    def test_missing_command_produces_environment_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            contract = VerificationContract(
+                deterministic_checks=("command_exit_zero:nonexistent_cmd_xyz",),
+            )
+            result = _worker_result()
+            vr = execute_checks(contract, result, repo)
+            self.assertFalse(vr.accepted)
+            self.assertTrue(len(vr.failures) > 0)
+            f = vr.failures[0]
+            self.assertEqual(f.category, FailureCategory.ENVIRONMENT)
+            self.assertFalse(f.retryable)
+            self.assertEqual(f.blame, "environment")
+
+    def test_failed_deterministic_check_produces_deterministic_rejection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            contract = VerificationContract(
+                deterministic_checks=("file_exists:missing.py",),
+            )
+            result = _worker_result()
+            vr = execute_checks(contract, result, repo)
+            self.assertFalse(vr.accepted)
+            self.assertTrue(len(vr.failures) > 0)
+            f = vr.failures[0]
+            self.assertEqual(f.category, FailureCategory.DETERMINISTIC_REJECTION)
+            self.assertTrue(f.retryable)
+            self.assertEqual(f.blame, "deterministic_rejection")
+
+    def test_inconclusive_semantic_produces_semantic_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            contract = VerificationContract(
+                semantic_check="Code is idiomatic",
+            )
+            result = _worker_result()
+            vr = execute_checks(contract, result, repo)
+            self.assertFalse(vr.accepted)
+            self.assertTrue(len(vr.failures) > 0)
+            f = vr.failures[0]
+            self.assertEqual(f.category, FailureCategory.SEMANTIC_INCONCLUSIVE)
+            self.assertFalse(f.retryable)
+
+    def test_inconclusive_evidence_produces_missing_context_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            contract = VerificationContract(
+                evidence_requirements=("output/report.txt",),
+            )
+            result = _worker_result()
+            vr = execute_checks(contract, result, repo)
+            self.assertFalse(vr.accepted)
+            self.assertTrue(len(vr.failures) > 0)
+            f = vr.failures[0]
+            self.assertEqual(f.category, FailureCategory.MISSING_CONTEXT)
+
+    def test_accepted_check_has_no_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            (repo / "main.py").write_text("x")
+            contract = VerificationContract(
+                deterministic_checks=("file_exists:main.py",),
+            )
+            result = _worker_result()
+            vr = execute_checks(contract, result, repo)
+            self.assertTrue(vr.accepted)
+            self.assertEqual(vr.failures, [])
 
 
 if __name__ == "__main__":

@@ -12,11 +12,12 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from cost_router.usage.aggregation import AnalyticsStore
-from cost_router.dashboard.server import _handler
-from cost_router.memory import MemoryStore
-from cost_router.config.paths import default_memory_path
-from cost_router.core.contracts import (
+from c4harness.usage.aggregation import AnalyticsStore
+from c4harness.dashboard.server import _handler
+from c4harness.memory import MemoryStore
+from c4harness.config.paths import default_memory_path
+from c4harness.config.workers import default_workers_path
+from c4harness.core.contracts import (
     Difficulty,
     Risk,
     RouteDecision,
@@ -26,8 +27,8 @@ from cost_router.core.contracts import (
     VerificationResult,
     WorkerResult,
 )
-from cost_router.setup_user import setup_user
-from cost_router.delegator.async_runtime import AsyncTaskConfig, AsyncTaskStore
+from c4harness.setup_user import setup_user
+from c4harness.delegator.async_runtime import AsyncTaskConfig, AsyncTaskStore
 
 
 def decision(backend: str, model: str = "test-model") -> RouteDecision:
@@ -56,10 +57,33 @@ def result(total: int | None, delegated: int = 1000, saved: int = 800) -> Worker
 
 
 class DashboardTests(unittest.TestCase):
+    def test_default_user_paths_use_only_c4harness_namespace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "HOME": tmp,
+                "XDG_DATA_HOME": f"{tmp}/data",
+                "XDG_CONFIG_HOME": f"{tmp}/config",
+                "COST_ROUTER_MEMORY": f"{tmp}/ignored-legacy.sqlite3",
+                "COST_ROUTER_WORKERS": f"{tmp}/ignored-legacy.json",
+            },
+            clear=False,
+        ):
+            os.environ.pop("C4HARNESS_MEMORY", None)
+            os.environ.pop("C4HARNESS_WORKERS", None)
+            self.assertEqual(
+                default_memory_path(),
+                Path(tmp) / "data" / "c4harness" / "memory.sqlite3",
+            )
+            self.assertEqual(
+                default_workers_path(),
+                Path(tmp) / "config" / "c4harness" / "workers.json",
+            )
+
     def test_global_path_override_and_codex_thread_capture(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(
             os.environ,
-            {"COST_ROUTER_MEMORY": f"{tmp}/ledger.sqlite3", "CODEX_THREAD_ID": "thread-42"},
+            {"C4HARNESS_MEMORY": f"{tmp}/ledger.sqlite3", "CODEX_THREAD_ID": "thread-42"},
         ):
             self.assertEqual(default_memory_path(), Path(tmp) / "ledger.sqlite3")
             task = Task(goal="worker task", parent_task_label="parent task")
@@ -230,7 +254,7 @@ class DashboardTests(unittest.TestCase):
             {"HOME": tmp, "XDG_DATA_HOME": f"{tmp}/data"},
             clear=False,
         ):
-            os.environ.pop("COST_ROUTER_MEMORY", None)
+            os.environ.pop("C4HARNESS_MEMORY", None)
             first = setup_user()
             skill = Path(first["skill_path"]) / "SKILL.md"
             self.assertEqual(first["skill_status"], "installed")
@@ -241,20 +265,20 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(skill.read_text(encoding="utf-8"), "local change")
             updated = setup_user(force=True)
             self.assertEqual(updated["skill_status"], "updated")
-            self.assertIn("name: cost-router", skill.read_text(encoding="utf-8"))
-            self.assertIn(str(Path(tmp) / "data" / "cost-router"), updated["codex_config"])
+            self.assertIn("name: c4harness", skill.read_text(encoding="utf-8"))
+            self.assertIn(str(Path(tmp) / "data" / "c4harness"), updated["codex_config"])
 
     def test_bundled_skill_is_self_contained(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        bundled = root / "cost_router/bundled_skill"
+        bundled = root / "c4harness/bundled_skill"
         skill_text = (bundled / "SKILL.md").read_text(encoding="utf-8")
         agent_text = (bundled / "agents/openai.yaml").read_text(encoding="utf-8")
-        self.assertIn("name: cost-router", skill_text)
+        self.assertIn("name: c4harness", skill_text)
         self.assertIn("### Risk Disclosure and Consent", skill_text)
         self.assertIn("Wait for explicit user approval", skill_text)
         self.assertIn("Codex is not automatically awakened", skill_text)
         self.assertIn("Retry the same bounded operation once", skill_text)
-        self.assertIn('display_name: "Cost Router"', agent_text)
+        self.assertIn('display_name: "C4Harness"', agent_text)
 
 
 if __name__ == "__main__":

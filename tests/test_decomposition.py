@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cost_router.decompose import (
+from c4harness.decompose import (
     DecompositionPlanner,
     DecompositionService,
     ExecutionMode,
@@ -23,9 +23,9 @@ from cost_router.decompose import (
     WorkerRegistry,
     match_capabilities,
 )
-from cost_router.memory import MemoryStore
-from cost_router.delegator.runtime import DelegationRuntime, PreparedWorker
-from cost_router.core.contracts import (
+from c4harness.memory import MemoryStore
+from c4harness.delegator.runtime import DelegationRuntime, PreparedWorker
+from c4harness.core.contracts import (
     Difficulty,
     Evidence,
     Risk,
@@ -104,7 +104,7 @@ class DecompositionTests(unittest.TestCase):
             root = Path(tmp)
             writable = root / "example.py"
             writable.write_text("value = 1\n", encoding="utf-8")
-            from cost_router.core.contracts import TaskConstraints, TaskMode
+            from c4harness.core.contracts import TaskConstraints, TaskMode
 
             task = Task(
                 goal="plan a code change",

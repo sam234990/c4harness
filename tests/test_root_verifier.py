@@ -23,8 +23,8 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from cost_router.core.contracts import Evidence, VerificationResult
-from cost_router.core.graph import (
+from c4harness.core.contracts import Evidence, VerificationResult
+from c4harness.core.graph import (
     AcceptanceCriterion,
     DecompositionPlan,
     ExecutionShape,
@@ -40,20 +40,20 @@ from cost_router.core.graph import (
     TaskSituation,
     VerificationContract,
 )
-from cost_router.delegator.scheduler import (
+from c4harness.delegator.scheduler import (
     GraphResult,
     NodeOutcome,
     NodeState,
 )
-from cost_router.verifier.root import (
+from c4harness.verifier.root import (
     CoverageReport,
     CriterionCoverage,
     RequirementCoverageEntry,
     RootVerificationResult,
     RootVerifier,
 )
-from cost_router.application.verify_root import verify_root
-from cost_router.hooks import HookSet
+from c4harness.application.verify_root import verify_root
+from c4harness.hooks import HookSet
 
 
 # ---------------------------------------------------------------------------

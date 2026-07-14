@@ -52,7 +52,7 @@
 ├── claude-research.md         # research notes and feasibility checks
 ├── implementation.md          # this implementation blueprint
 ├── experiments/               # sanitized experiments and demos
-├── cost_router/               # main package
+├── c4harness/               # main package
 │   ├── __init__.py
 │   ├── cli.py                 # command line entrypoint
 │   ├── config.py              # load env/config/backend definitions

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from cost_router.decompose import (
+from c4harness.decompose import (
     HardCapabilityRequirements,
     TaskNodeContract,
     VerificationContract,
@@ -11,7 +11,7 @@ from cost_router.decompose import (
     WorkerAssignmentPolicy,
     WorkerRegistry,
 )
-from cost_router.history import CapabilityEvidence, CapabilityProfile
+from c4harness.history import CapabilityEvidence, CapabilityProfile
 
 
 def worker(worker_id: str, *, tools=("read",), soft=0.5) -> WorkerArm:

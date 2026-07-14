@@ -5,16 +5,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cost_router.backends.codex_subagent import CodexSubagentBackend, parse_codex_output
-from cost_router.backends.external_cli import (
+from c4harness.backends.codex_subagent import CodexSubagentBackend, parse_codex_output
+from c4harness.backends.external_cli import (
     _collect_patch_proposal,
     claude_cli_backend,
     parse_external_cli_output,
 )
-from cost_router.config.providers import provider_from_env
-from cost_router.memory import MemoryStore
-from cost_router.router import route_task
-from cost_router.core.contracts import (
+from c4harness.config.providers import provider_from_env
+from c4harness.memory import MemoryStore
+from c4harness.router import route_task
+from c4harness.core.contracts import (
     DataClassification,
     Difficulty,
     ExternalPolicy,
@@ -26,24 +26,30 @@ from cost_router.core.contracts import (
     TokenAnalysis,
     TokenUsage,
 )
-from cost_router.usage import extract_token_usage
-from cost_router.usage import estimate_delegation_savings
-from cost_router.verifier import verify_worker_result
+from c4harness.usage import extract_token_usage
+from c4harness.usage import estimate_delegation_savings
+from c4harness.verifier import verify_worker_result
 
 
 class CostRouterCoreTests(unittest.TestCase):
+    def test_public_cli_uses_c4harness_name(self):
+        from c4harness.cli import build_parser
+
+        parser = build_parser()
+        self.assertEqual(parser.prog, "c4harness")
+
     def test_configured_claude_worker_uses_model_alias(self):
         from argparse import Namespace
         import json
-        from cost_router.cli import resolve_worker_selection
-        from cost_router.config.workers import builtin_workers
+        from c4harness.cli import resolve_worker_selection
+        from c4harness.config.workers import builtin_workers
 
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "workers.json"
             document = {"version": 1, "workers": builtin_workers()}
             document["workers"][0]["model"] = "mimo-v2.5-pro"
             document["workers"][0]["model_alias"] = "opus"
-            from cost_router.config.workers import WorkerManifestStore
+            from c4harness.config.workers import WorkerManifestStore
             store = WorkerManifestStore(path)
             baseline = store.load_document()
             store.save(document, expected_revision=baseline["revision"])
@@ -57,7 +63,7 @@ class CostRouterCoreTests(unittest.TestCase):
             self.assertEqual(args.claude_model, "opus")
 
     def test_external_policy_requires_explicit_private_transfer_authorization(self):
-        from cost_router.cli import build_parser, external_policy_error, external_transfer_error
+        from c4harness.cli import build_parser, external_policy_error, external_transfer_error
 
         parser = build_parser()
         private_args = parser.parse_args(
@@ -96,18 +102,18 @@ class CostRouterCoreTests(unittest.TestCase):
                 ),
             )
             self.assertEqual(task.to_dict()["constraints"]["external_policy"], "allow")
-            backend = claude_cli_backend(work_dir=Path(tmp) / ".cost-router")
+            backend = claude_cli_backend(work_dir=Path(tmp) / ".c4harness")
             _, _, prompt = backend.prepare(task)
             self.assertIn("external_policy=allow", prompt)
             self.assertIn("data_classification=private", prompt)
 
     def test_legacy_public_import_paths_survive_modular_refactor(self):
-        from cost_router.analytics import AnalyticsStore
-        from cost_router.async_tasks import AsyncTaskRuntime
-        from cost_router.cli import memory_command
-        from cost_router.paths import default_memory_path
-        from cost_router.schemas import Task
-        from cost_router.usage import estimate_token_count
+        from c4harness.analytics import AnalyticsStore
+        from c4harness.async_tasks import AsyncTaskRuntime
+        from c4harness.cli import memory_command
+        from c4harness.paths import default_memory_path
+        from c4harness.schemas import Task
+        from c4harness.usage import estimate_token_count
 
         self.assertTrue(callable(default_memory_path))
         self.assertTrue(callable(estimate_token_count))
@@ -145,7 +151,7 @@ class CostRouterCoreTests(unittest.TestCase):
             backend = CodexSubagentBackend(
                 provider=self.provider(),
                 worker_name="qwen_explorer",
-                work_dir=Path(tmp) / ".cost-router",
+                work_dir=Path(tmp) / ".c4harness",
             )
             agent_file, output_file, command, prompt = backend.prepare(task)
             command_text = "\n".join(command)
@@ -171,7 +177,7 @@ class CostRouterCoreTests(unittest.TestCase):
             backend = claude_cli_backend(
                 command="claude",
                 model="sonnet-test",
-                work_dir=Path(tmp) / ".cost-router",
+                work_dir=Path(tmp) / ".c4harness",
             )
             output_file, command, prompt = backend.prepare(task)
             self.assertEqual(command[:4], ["claude", "-p", "--output-format", "json"])
@@ -210,7 +216,7 @@ class CostRouterCoreTests(unittest.TestCase):
                 write_paths=[source],
                 constraints=TaskConstraints(mode=TaskMode.PATCH),
             )
-            backend = claude_cli_backend(work_dir=Path(tmp) / ".cost-router")
+            backend = claude_cli_backend(work_dir=Path(tmp) / ".c4harness")
             output_file, command, prompt = backend.prepare(task)
 
             self.assertIn("acceptEdits", command)
@@ -283,7 +289,7 @@ Changed the configured value.
                 write_paths=[source],
                 constraints=TaskConstraints(mode=TaskMode.PATCH),
             )
-            backend = claude_cli_backend(work_dir=Path(tmp) / ".cost-router")
+            backend = claude_cli_backend(work_dir=Path(tmp) / ".c4harness")
             output_file, _, _ = backend.prepare(task)
             workspace = output_file.parent / "workspace"
             (workspace / "write_path" / "001_example.py").write_text(
